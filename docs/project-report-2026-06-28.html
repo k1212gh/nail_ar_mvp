@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>네일아트 AR MVP — 프로젝트 현황 리포트 (2026-06-28)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a3038;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950;
+    --yellow:#d29922; --orange:#db6d28; --red:#f85149; --purple:#bc8cff;
+    --track:#21262d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;
+    line-height:1.6; padding:32px 20px 80px;
+  }
+  .wrap{max-width:1100px;margin:0 auto}
+  header{margin-bottom:28px;border-bottom:1px solid var(--border);padding-bottom:20px}
+  header h1{font-size:28px;font-weight:700;letter-spacing:-.5px}
+  header .sub{color:var(--muted);margin-top:6px;font-size:14px}
+  header .tag{display:inline-block;background:var(--panel2);color:var(--accent);
+    border:1px solid var(--border);border-radius:999px;padding:3px 12px;font-size:12px;margin-top:10px;margin-right:6px}
+
+  .grid{display:grid;gap:18px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:780px){.g3,.g2{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:14px;font-weight:600}
+  .card h3{font-size:16px;margin:18px 0 10px}
+
+  .metric{font-size:42px;font-weight:800;line-height:1}
+  .metric small{font-size:16px;color:var(--muted);font-weight:500}
+  .metric-label{color:var(--muted);font-size:13px;margin-top:6px}
+
+  .bar{background:var(--track);border-radius:8px;height:10px;overflow:hidden;margin:8px 0}
+  .bar > span{display:block;height:100%;border-radius:8px}
+
+  /* ring gauge */
+  .gauge{display:flex;align-items:center;gap:18px}
+  .ring{--p:0;--c:var(--green);width:96px;height:96px;border-radius:50%;flex:none;
+    background:conic-gradient(var(--c) calc(var(--p)*1%), var(--track) 0);
+    display:grid;place-items:center}
+  .ring::before{content:"";position:absolute;width:72px;height:72px;border-radius:50%;background:var(--panel)}
+  .ring b{position:relative;font-size:22px;font-weight:800}
+  .ring-wrap{position:relative;display:grid;place-items:center}
+
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  td.num{font-variant-numeric:tabular-nums;text-align:right;color:var(--text)}
+
+  .pill{display:inline-block;border-radius:6px;padding:2px 9px;font-size:12px;font-weight:600}
+  .ok{background:rgba(63,185,80,.15);color:var(--green)}
+  .part{background:rgba(210,153,34,.15);color:var(--yellow)}
+  .skel{background:rgba(219,109,40,.15);color:var(--orange)}
+  .none{background:rgba(248,81,73,.15);color:var(--red)}
+
+  ul.clean{list-style:none}
+  ul.clean li{padding:7px 0 7px 26px;position:relative;border-bottom:1px solid var(--border);font-size:14px}
+  ul.clean li:last-child{border-bottom:none}
+  ul.clean li::before{position:absolute;left:0;top:7px}
+  li.done::before{content:"✅"}
+  li.todo::before{content:"⬜"}
+  li.warn::before{content:"⚠️"}
+
+  .action{display:flex;gap:14px;align-items:flex-start;padding:14px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:10px;margin-bottom:12px}
+  .action .n{flex:none;width:30px;height:30px;border-radius:8px;background:var(--accent);color:#0d1117;
+    font-weight:800;display:grid;place-items:center}
+  .action .body strong{display:block;margin-bottom:3px}
+  .action .body span{color:var(--muted);font-size:13px}
+  .prio{margin-left:auto;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;flex:none}
+  .p-hi{background:rgba(248,81,73,.18);color:var(--red)}
+  .p-md{background:rgba(210,153,34,.18);color:var(--yellow)}
+
+  .sec-title{display:flex;align-items:center;gap:10px;margin:34px 0 16px}
+  .sec-title h2{font-size:18px;letter-spacing:-.3px}
+  .sec-title .line{flex:1;height:1px;background:var(--border)}
+
+  footer{margin-top:48px;color:var(--muted);font-size:12px;text-align:center}
+  code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:13px;color:var(--purple)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>💅 네일아트 보조 AR — 프로젝트 현황 리포트</h1>
+    <div class="sub">nail_ar_mvp · 생성일 2026-06-28 · 컴퓨터비전 파이프라인 MVP (멀티플랫폼 준비)</div>
+    <div>
+      <span class="tag">Python 3 · OpenCV · MediaPipe</span>
+      <span class="tag">JS 웹 이식 · ONNX</span>
+      <span class="tag">특허 청구항 매핑</span>
+    </div>
+  </header>
+
+  <!-- TOP KPI ROW -->
+  <div class="grid g3">
+    <div class="card">
+      <h2>핵심 MVP 엔진 완성도</h2>
+      <div class="gauge">
+        <div class="ring-wrap"><div class="ring" style="--p:85;--c:var(--green)"><b>85%</b></div></div>
+        <div>
+          <div class="metric-label">PC CV 파이프라인 + A3 곡면 워핑 엔진</div>
+          <div style="margin-top:8px;font-size:13px;color:var(--muted)">
+            검증 5종 전부 <span class="pill ok">PASS</span> · 패리티 0.0<br>
+            웹 엔진 실기기 GL 검증만 대기
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>전체 특허 로드맵 진행률</h2>
+      <div class="gauge">
+        <div class="ring-wrap"><div class="ring" style="--p:25;--c:var(--yellow)"><b>25%</b></div></div>
+        <div>
+          <div class="metric-label">Phase A~D + 글래스 포팅 기준</div>
+          <div style="margin-top:8px;font-size:13px;color:var(--muted)">
+            독립항 1: 진행 중<br>
+            독립항 24·30: 미착수
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>보안 점수</h2>
+      <div class="gauge">
+        <div class="ring-wrap"><div class="ring" style="--p:68;--c:var(--orange)"><b>68</b></div></div>
+        <div>
+          <div class="metric-label">/ 100 — 로컬 MVP 기준</div>
+          <div style="margin-top:8px;font-size:13px;color:var(--muted)">
+            심각 3 · 경미 2<br>
+            하드코딩 시크릿/eval 없음
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CODE STATS -->
+  <div class="sec-title"><h2>📦 코드 상태</h2><div class="line"></div></div>
+  <div class="grid g3">
+    <div class="card"><div class="metric">~3,400<small> 줄</small></div><div class="metric-label">전체 코드 (Python + JS)</div></div>
+    <div class="card"><div class="metric">23<small> 파일</small></div><div class="metric-label">src/ 16 (Python) + web/ 7 (JS)</div></div>
+    <div class="card"><div class="metric">0<small> 건</small></div><div class="metric-label">TODO / FIXME 주석 (정식 구현)</div></div>
+  </div>
+
+  <div class="grid g2" style="margin-top:18px">
+    <div class="card">
+      <h2>구성 요소</h2>
+      <table>
+        <tr><th>레이어</th><th>내용</th></tr>
+        <tr><td>Python 백엔드</td><td>~2,440줄 · 파이프라인/세그/기하/추적</td></tr>
+        <tr><td>JS 웹 이식</td><td>994줄 · MediaPipe JS + A3 렌더러 + ONNX YOLO</td></tr>
+        <tr><td>Android</td><td><span class="pill skel">스켈레톤만</span> Gradle 구조</td></tr>
+        <tr><td>모델</td><td>hand_landmarker (7.8MB) · nails_seg ONNX (47MB)</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h2>핵심 모듈 / 진입점</h2>
+      <ul class="clean">
+        <li class="done"><code>NailARPipeline.process()</code> — 오케스트레이터</li>
+        <li class="done"><code>HandLandmarkDetector</code> — MediaPipe 손 검출</li>
+        <li class="done"><code>NailSegmenter</code> — GrabCut/색상/YOLO 세그</li>
+        <li class="done"><code>DesignEngine.render()</code> — A3 곡면 워핑 엔진</li>
+        <li class="warn"><code>POST /infer</code> — 에지 추론 API (인증 없음)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PHASE PROGRESS -->
+  <div class="sec-title"><h2>🗺️ 단계별 진행 현황</h2><div class="line"></div></div>
+  <div class="card">
+    <table>
+      <tr><th>Phase</th><th>내용</th><th>상태</th><th style="width:30%">진척</th></tr>
+      <tr>
+        <td><strong>Phase A</strong></td><td>특허 청구항 1 완성 (중심·추적·스무딩·A3·안경)</td>
+        <td><span class="pill part">진행 중</span></td>
+        <td><div class="bar"><span style="width:38%;background:var(--yellow)"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase 0</td><td>에지 오프로드 루프 (폰↔PC)</td>
+        <td><span class="pill part">거의 완료</span></td>
+        <td><div class="bar"><span style="width:67%;background:var(--green)"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase 1</td><td>Unity 토대 (Android 폰 우선)</td>
+        <td><span class="pill none">미착수</span></td>
+        <td><div class="bar"><span style="width:0%"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase 2</td><td>글래스 디바이스 리스크 검증 (초점·고정)</td>
+        <td><span class="pill none">미착수</span></td>
+        <td><div class="bar"><span style="width:0%"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase 3</td><td>글래스 표시 포팅 + 특허 시연 녹화</td>
+        <td><span class="pill none">미착수</span></td>
+        <td><div class="bar"><span style="width:0%"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase B</td><td>가림 보정 시스템 (독립항 24)</td>
+        <td><span class="pill none">미착수</span></td>
+        <td><div class="bar"><span style="width:0%"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase C</td><td>전사 + 폐루프 (독립항 30·14)</td>
+        <td><span class="pill none">미착수</span></td>
+        <td><div class="bar"><span style="width:5%;background:var(--orange)"></span></div></td>
+      </tr>
+      <tr>
+        <td>Phase D</td><td>종속항 마감 (IMU·연산분담·프라이버시)</td>
+        <td><span class="pill none">미착수</span></td>
+        <td><div class="bar"><span style="width:0%"></span></div></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="grid g2" style="margin-top:18px">
+    <div class="card">
+      <h2>✅ 완료 항목</h2>
+      <ul class="clean">
+        <li class="done">A0. 중심 정확도 (청구항 2) — 2026-06-24</li>
+        <li class="done">A3 PC 엔진 — 곡면·기울기 워핑, 테스트 5종 PASS</li>
+        <li class="done">Phase 0a·0b — 에지 오프로드 기본 루프</li>
+        <li class="done">웹 이식 — MediaPipe JS + A3 렌더러 로직 검증</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>⬜ 다음 미완료 (가까운 순)</h2>
+      <ul class="clean">
+        <li class="todo">0c. 지연 은폐 + fps/지연 계측, 폰 실기기 테스트 1회</li>
+        <li class="todo">A3 웹 엔진 실기기 GL 검증</li>
+        <li class="todo">A1·A2. 멀티 손톱 추적 + 시간 스무딩</li>
+        <li class="todo">Phase 1. Unity + RayNeo OpenXR ARDK 셋업</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- SECURITY -->
+  <div class="sec-title"><h2>🔒 보안 체크</h2><div class="line"></div></div>
+  <div class="grid g2">
+    <div class="card">
+      <h2>발견 사항</h2>
+      <ul class="clean">
+        <li class="warn"><strong>POST /infer 인증 부재</strong> — <code>web/edge_serve.py:77</code> (로컬 전용이나 토큰 권장)</li>
+        <li class="warn"><strong>CORS 와일드카드 <code>*</code></strong> — <code>web/edge_serve.py:88</code></li>
+        <li class="warn"><strong>.gitignore 없음</strong> — 모델/로그/캐시 추적 위험</li>
+        <li class="todo">console.log 잔재 2건 — <code>web/yolo.js:223</code>, <code>web/app.js:153</code></li>
+        <li class="todo">타입 안정성 미적용 — 바닐라 JS (TS 미사용)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>안전 확인 (Clear)</h2>
+      <table>
+        <tr><th>항목</th><th class="num">결과</th></tr>
+        <tr><td>하드코딩 시크릿/API키/PW</td><td class="num"><span class="pill ok">없음</span></td></tr>
+        <tr><td>eval / exec / os.system</td><td class="num"><span class="pill ok">없음</span></td></tr>
+        <tr><td>dangerouslySetInnerHTML</td><td class="num"><span class="pill ok">없음</span></td></tr>
+        <tr><td><code>.env</code> 노출</td><td class="num"><span class="pill ok">파일 없음</span></td></tr>
+        <tr><td>any 타입 (TS)</td><td class="num">해당 없음</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- NEXT ACTIONS -->
+  <div class="sec-title"><h2>🎯 다음 액션 아이템 (Top 3)</h2><div class="line"></div></div>
+  <div class="card">
+    <div class="action">
+      <div class="n">1</div>
+      <div class="body">
+        <strong>폰 실기기 A3 웹 엔진 GL 검증 + Phase 0c 마무리</strong>
+        <span>가장 빠른 마일스톤. 손톱에 곡면 별이 ≥15fps·안정 표시되면 Phase 0 완료. fps/지연 계측 포함.</span>
+      </div>
+      <span class="prio p-hi">최우선</span>
+    </div>
+    <div class="action">
+      <div class="n">2</div>
+      <div class="body">
+        <strong>보안 기본 정비 — .gitignore + /infer 인증 + CORS 제한</strong>
+        <span>모델/로그 제외 .gitignore 추가, 에지 API에 토큰 검증, CORS를 LAN 출처로 제한. 빠르게 보안 점수 +20p.</span>
+      </div>
+      <span class="prio p-md">권장</span>
+    </div>
+    <div class="action">
+      <div class="n">3</div>
+      <div class="body">
+        <strong>Phase 1 착수 — Unity + RayNeo OpenXR ARDK 셋업</strong>
+        <span>글래스 도착 전 최종 코드베이스를 Unity로 이전, Android(S22 Ultra) 폰에서 곡면 정합 우선 완주.</span>
+      </div>
+      <span class="prio p-md">계획</span>
+    </div>
+  </div>
+
+  <footer>
+    nail_ar_mvp · /report 자동 생성 · 2026-06-28 · SoT: PATENT_IMPLEMENTATION.md, IMPLEMENTATION_PLAN.md
+  </footer>
+
+</div>
+</body>
+</html>

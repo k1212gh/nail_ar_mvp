@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Phone Live (calib)</title>
+<style>body{margin:0;background:#111;color:#ddd;font-family:sans-serif;text-align:center}
+img{max-width:100vw;max-height:88vh;object-fit:contain}
+#s{padding:6px;font-size:14px}</style></head>
+<body>
+<div id="s">phone view (idx0) — position at your right eye, hold hand up so grid shows</div>
+<img id="v" src="_live.jpg">
+<script>
+// refresh the grabbed phone frame ~3/s (cache-busted)
+setInterval(()=>{document.getElementById('v').src='_live.jpg?t='+Date.now();},330);
+</script></body></html>

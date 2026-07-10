@@ -1,0 +1,60 @@
+# ===== 시크릿 / 키 (절대 커밋 금지) =====
+certs/
+**/telegram_config.json
+**/nailar_config.json
+*.key
+*.pem
+*.keystore
+*.jks
+*.p12
+local.properties
+android/local.properties
+
+# ===== Unity 생성물 (Nail/) + 죽은 사본 (_archive/) =====
+Nail/Library/
+Nail/Temp/
+Nail/Obj/
+Nail/obj/
+Nail/Build/
+Nail/Builds/
+Nail/Logs/
+Nail/UserSettings/
+Nail/MemoryCaptures/
+Nail/Recordings/
+_archive/
+
+# ===== Android / Gradle 빌드 산출물 =====
+android/.gradle/
+android/build/
+android/app/build/
+android/**/build/
+android/captures/
+android/.idea/
+*.iml
+
+# ===== 대용량 바이너리 / 아카이브 (재생성·재다운로드 가능) =====
+*.apk
+*.aab
+*.zip
+samples/apks/
+
+# ===== 로그 / 캐시 / 임시 산출물 =====
+logs/
+*.log
+out/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+_snap_*.jpg
+_last_*.jpg
+_live.jpg
+web/_live.jpg
+web/_calib_push.json
+
+# ===== OS / 에디터 =====
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
