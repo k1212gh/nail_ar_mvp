@@ -40,13 +40,13 @@ class _CenterKalman:
 
     def predict(self) -> Tuple[float, float]:
         p = self.kf.predict()
-        return float(p[0]), float(p[1])
+        return float(p[0, 0]), float(p[1, 0])   # (4,1) 배열 → 0-d 스칼라 인덱싱 (numpy>=2 호환)
 
     def correct(self, x, y) -> Tuple[float, float]:
         m = np.array([[np.float32(x)], [np.float32(y)]])
         c = self.kf.correct(m)
         self.misses = 0
-        return float(c[0]), float(c[1])
+        return float(c[0, 0]), float(c[1, 0])   # numpy>=2: float(1-원소 배열) 금지 → [i,0]
 
 
 class NailTracker:

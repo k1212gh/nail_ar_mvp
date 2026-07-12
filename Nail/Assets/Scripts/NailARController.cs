@@ -79,8 +79,9 @@ public class NailARController : MonoBehaviour
     // calib files keep their old numeric meaning (mode:2 = Calib).
     //   ARMesh = curved per-nail mesh + baked per-finger textures ("측정->베이킹->포즈만")
     //   Enroll = magic-mirror + server-side mm measurement -> nail_profile.json
-    public enum NailMode { ARGrid, ARDesign, Calib, ARMesh, Enroll }
-    private const int MODE_COUNT = 5;                       // enum size (modulo safety)
+    //   MirrorMesh = magic-mirror + curved mesh design ON the feed (정합 정확·VAC 없음). append 유지.
+    public enum NailMode { ARGrid, ARDesign, Calib, ARMesh, Enroll, MirrorMesh }
+    private const int MODE_COUNT = 6;                       // enum size (modulo safety)
     private static readonly int[] k_TapCycle = { (int)NailMode.ARGrid, (int)NailMode.ARDesign, (int)NailMode.ARMesh };
     [Header("Modes")] public int startMode = 0;   // 0 = magic-mirror upright (recommended)
     private int m_Mode = -1, m_LastCalibMode = -999;
@@ -336,6 +337,13 @@ public class NailARController : MonoBehaviour
                 SetFeed(true); SetCanvasRot(270f); SetCanvasFlip(false, true); m_DynDepth = false; SetCanvasDepth(100f);
                 if (overlay != null) overlay.show = false;
                 SetGrid(false, 0, false, false); break;
+            case NailMode.MirrorMesh: // MAGIC-MIRROR + DESIGN: feed on + 곡면 메시 디자인을 '피드 위'에 렌더.
+                                      // 정합 정확·VAC 없음(먼 패널). see-through 대안 — "디자인을 손톱 위에"를 깨끗하게.
+                SetFeed(true); SetCanvasRot(270f); SetCanvasFlip(false, true); m_DynDepth = false; SetCanvasDepth(100f);
+                if (overlay != null) overlay.show = false;
+                SetGrid(false, 0, false, false);
+                if (meshR != null) { meshR.show = true; meshR.parallaxEnable = false; meshR.calibOffset = Vector2.zero; meshR.ReloadBake(); }
+                break;
         }
         ShowHud(enroll ? $"[{m_Mode}] Enroll — 손등을 15~50cm에서 천천히" : $"[{m_Mode}] {(NailMode)m_Mode}");
         Debug.Log($"[NailAR] mode -> {m_Mode} {(NailMode)m_Mode}");

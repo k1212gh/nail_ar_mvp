@@ -1,0 +1,19 @@
+{
+  "name": "nail-ar-station",
+  "version": "0.1.0",
+  "description": "네일-AR 보정 스테이션 — Electron 껍데기(서버는 기존 Python 그대로)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^32.0.0"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "htm": "^3.1.1"
+  }
+}

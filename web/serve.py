@@ -57,6 +57,7 @@ def ensure_cert(ip: str) -> None:
         san.append(x509.IPAddress(ipaddress.ip_address(ip)))
     except ValueError:
         pass
+    os.makedirs(_CERT_DIR, exist_ok=True)   # fresh clone: certs/ is gitignored → 없으면 먼저 생성
     now = datetime.datetime.utcnow()
     cert = (x509.CertificateBuilder()
             .subject_name(name).issuer_name(name)

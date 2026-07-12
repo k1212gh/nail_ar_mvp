@@ -38,6 +38,11 @@ android/.idea/
 *.zip
 samples/apks/
 
+# ===== 파이썬 venv / Node modules (대용량, 재생성 가능) =====
+.venv/
+venv/
+electron/node_modules/
+
 # ===== 로그 / 캐시 / 임시 산출물 =====
 logs/
 *.log
@@ -52,6 +57,18 @@ _last_*.jpg
 _live.jpg
 web/_live.jpg
 web/_calib_push.json
+web/_eye_calib_push.json
+web/_monitor_calib_push.json
+web/_monitor_calib_state.json
+nail_profile.json
+
+# ===== Unity 생성 IDE 파일 (자동 생성, 커밋 불필요) =====
+*.csproj
+*.sln
+*.user
+
+# ===== 실수로 생긴 중첩 중복 클론 (같은 repo가 통째로 복사됨) =====
+/nail_ar_mvp/
 
 # ===== OS / 에디터 =====
 .DS_Store
