@@ -60,6 +60,7 @@ from src.geometry import geometry_from_roi             # noqa: E402
 MODE = os.environ.get("NAIL_MODE", "hands")            # "hands" | "yolo"
 FACING = os.environ.get("NAIL_FACING", "off")          # "off" | "back"(nails-only) | "palm"
 EXTENDED = os.environ.get("NAIL_EXTENDED", "on")       # "on" = 편 손가락만(주먹 제외) | "off"
+_STABLE_PX = float(os.environ.get("NAIL_STABLE_PX", "3.0"))   # 손 정지 판정 속도 임계(px/frame)
 _hand: HandLandmarkDetector | None = None
 _trk: NailTracker | None = None
 
@@ -97,6 +98,7 @@ def _infer_hands(img) -> list:
             continue
         sx, sy = trk.smooth(geom)         # 칼만 시간융합(이전 결과로 가산)
         seen.add(trk._key(geom))
+        spd = trk.speed(geom)             # 손 정지 판정용 속도(px/frame)
         ex, ey = geom.axis_major
         cont = []
         if getattr(geom, "contour", None) is not None:
@@ -109,6 +111,8 @@ def _infer_hands(img) -> list:
             "facing": round(float(f), 5),
             "distM": round(float(getattr(roi, "dist_m", 0.0)), 4),
             "extended": round(float(getattr(roi, "extended", 1.0)), 1),
+            "speed": round(float(spd), 2),
+            "stable": bool(spd <= _STABLE_PX),   # 렌더 게이팅: 손 정지 시만 True(이중상 억제)
             "contour": cont,
         })
     trk.predict_missing(seen)             # 가려진 손가락 예측기 진행
