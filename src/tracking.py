@@ -48,6 +48,11 @@ class _CenterKalman:
         self.misses = 0
         return float(c[0, 0]), float(c[1, 0])   # numpy>=2: float(1-원소 배열) 금지 → [i,0]
 
+    def speed(self) -> float:
+        """현재 추정 속도 크기(px/frame). 렌더 게이팅(손 정지 판정)에 사용."""
+        s = self.kf.statePost
+        return float(np.hypot(s[2, 0], s[3, 0]))
+
 
 class NailTracker:
     """손가락 키(handedness+finger)별로 중심점을 추적·평활화."""
@@ -72,6 +77,11 @@ class NailTracker:
         kf = self._filters[key]
         kf.predict()
         return kf.correct(cx, cy)
+
+    def speed(self, geom) -> float:
+        """가장 최근 평활화 후 이 손가락의 칼만 속도 크기(px/frame). 필터 없으면 0."""
+        kf = self._filters.get(self._key(geom))
+        return kf.speed() if kf is not None else 0.0
 
     def predict_missing(self, seen_keys) -> Dict[str, tuple]:
         """이번 프레임에 검출 안 된 손가락은 예측으로 위치 유지.
