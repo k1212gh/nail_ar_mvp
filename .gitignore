@@ -61,6 +61,7 @@ web/_eye_calib_push.json
 web/_monitor_calib_push.json
 web/_monitor_calib_state.json
 nail_profile.json
+camera_calib.json
 
 # ===== Unity 생성 IDE 파일 (자동 생성, 커밋 불필요) =====
 *.csproj

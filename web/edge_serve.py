@@ -33,6 +33,8 @@ from config import GeomConfig
 from src.geometry import compute_geometry
 from src.log_setup import setup_logging
 from src.yolo_nail_seg import YoloNailSegmenter
+from src.card_scale import detect_card, nail_mm   # 신용카드 기준물 실치수 스케일
+from src.card_calib import scale_correction, fold_correction   # 카드 실측 → mm 추정 보정
 
 log = setup_logging("INFO", to_file=False)
 PORT = 8443
@@ -113,7 +115,7 @@ def _infer_hands(img) -> list:
     return nails
 
 
-def _infer_jpeg(buf: bytes) -> dict:
+def _infer_jpeg(buf: bytes, want_card: bool = False) -> dict:
     arr = np.frombuffer(buf, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -122,7 +124,29 @@ def _infer_jpeg(buf: bytes) -> dict:
     t0 = time.perf_counter()
     nails = _infer_hands(img) if MODE == "hands" else _infer_yolo(img)
     ms = (time.perf_counter() - t0) * 1000.0
-    return {"ok": True, "w": w, "h": h, "ms": round(ms, 1), "nails": nails}
+    res = {"ok": True, "w": w, "h": h, "ms": round(ms, 1), "nails": nails}
+    if want_card:
+        _attach_card_scale(img, res)
+    return res
+
+
+def _attach_card_scale(img, res: dict) -> None:
+    """프레임에 신용카드가 있으면 mm/px 스케일 + 손톱 실치수(mm)를 res 에 붙인다.
+
+    카드가 손톱과 같은 깊이 평면에 있다고 가정(사용자가 손 옆/뒤에 카드를 댐) → 초점거리·거리
+    가정 없이 실치수 확정. magic-mirror 실물크기 프리뷰(mmPerPx)와 손톱 mm 측정에 사용.
+    """
+    card = detect_card(img)
+    if card is None:
+        res["card"] = {"found": False}
+        return
+    mmpp = card["mm_per_px"]
+    res["card"] = {"found": True, "mmPerPx": round(mmpp, 5),
+                   "longPx": round(card["long_px"], 1),
+                   "corners": card["corners"].astype(int).tolist()}
+    for nd in res.get("nails", []):
+        lm, wm = nail_mm(nd.get("len", 0.0), nd.get("wid", 0.0), mmpp)
+        nd["lenMm"], nd["widMm"] = round(lm, 2), round(wm, 2)
 
 
 # --- 손톱 프로파일 측정(enroll) — "1회 측정 -> 베이킹 -> 런타임은 포즈만" 파이프라인의 1단계.
@@ -146,7 +170,7 @@ def _enroll_update(res: dict, reset: bool) -> dict:
             continue
         if float(nd.get("extended", 1.0)) < 0.5 or not nd.get("hand") or not nd.get("finger"):
             continue
-        mm = 1000.0 * d / f_px             # px -> mm (핀홀; f = focal_ratio * W)
+        mm = _MM_K * 1000.0 * d / f_px     # px -> mm (핀홀; 카드 캘리브 보정 _MM_K)
         _ENROLL.setdefault(f"{nd['hand']}:{nd['finger']}", []).append(
             (float(nd["len"]) * mm, float(nd["wid"]) * mm))
     best_hand, best_min = None, -1
@@ -182,6 +206,59 @@ def _write_profile():
         json.dump(prof, fp, ensure_ascii=False, indent=1)
 
 
+# --- 카드 실측 스케일 보정 (camera_calib.json) — mm 추정 보정계수 k (1.0=무보정) ---
+_CALIB_PATH = os.path.join(ROOT, "camera_calib.json")
+_CALIB_NEED = int(os.environ.get("NAIL_CALIB_NEED", "20"))
+_MM_K = 1.0
+_CALIB_RATIOS: list = []
+
+
+def _load_calib() -> float:
+    """camera_calib.json 이 있으면 mm 보정계수를 로드(없으면 1.0)."""
+    global _MM_K
+    try:
+        with open(_CALIB_PATH, encoding="utf-8") as fp:
+            _MM_K = float(json.load(fp).get("mmScaleCorrection", 1.0))
+    except Exception:
+        _MM_K = 1.0
+    return _MM_K
+
+
+def _calib_update(res: dict, reset: bool) -> dict:
+    """카드+손이 같이 잡힌 프레임에서 mm 보정계수를 누적 → 중앙값을 camera_calib.json 에 기록.
+
+    카드(실측 mm/px)와 파이프라인 예측 mm/px 의 비 k 를 손톱마다 모아 중앙값을 취한다.
+    카드는 초점거리/손크기 가정과 독립인 ground-truth 라 비순환(참고: src/card_calib.py)."""
+    global _MM_K
+    if reset:
+        _CALIB_RATIOS.clear()
+    card = res.get("card") or {}
+    f_px = HandConfig().focal_ratio * res["w"]
+    if card.get("found"):
+        cmmpp = float(card.get("mmPerPx", 0.0))
+        for nd in res.get("nails", []):
+            d = float(nd.get("distM", 0.0))
+            if d <= 0.05:
+                continue
+            k = scale_correction(cmmpp, d, f_px)
+            if k is not None and 0.3 < k < 3.0:      # 비상식적 비율 배제
+                _CALIB_RATIOS.append(k)
+    n = len(_CALIB_RATIOS)
+    k_med = fold_correction(_CALIB_RATIOS)
+    if n > 0:
+        _MM_K = k_med
+    done = n >= _CALIB_NEED
+    if done:
+        with open(_CALIB_PATH, "w", encoding="utf-8") as fp:
+            json.dump({"mmScaleCorrection": round(k_med, 5), "n": n,
+                       "focalRatio": HandConfig().focal_ratio}, fp,
+                      ensure_ascii=False, indent=1)
+    msg = (f"카드+손 동시 노출 유지 — {n}/{_CALIB_NEED}" + (" DONE" if done else "")) if n \
+        else "신용카드를 손톱 옆(같은 거리)에 대주세요"
+    return {"active": True, "count": n, "need": _CALIB_NEED, "done": done,
+            "k": round(k_med, 4), "msg": msg}
+
+
 def _infer_yolo(img) -> list:
     nails = []
     for m in _ensure_model().detect_full(img):
@@ -208,10 +285,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(n)
-            res = _infer_jpeg(body)
             qs = urllib.parse.parse_qs(query)
+            _calib = qs.get("calib", ["0"])[0] == "1"
+            res = _infer_jpeg(body, want_card=(qs.get("card", ["0"])[0] == "1" or _calib))
             if res.get("ok") and qs.get("enroll", ["0"])[0] == "1":
                 res["enroll"] = _enroll_update(res, qs.get("reset", ["0"])[0] == "1")
+            if res.get("ok") and _calib:
+                res["calib"] = _calib_update(res, qs.get("reset", ["0"])[0] == "1")
             log.info("infer bytes=%d nails=%d ms=%s", len(body), len(res.get("nails", [])), res.get("ms"))
             try:
                 open(os.path.join(ROOT, "_last_frame.jpg"), "wb").write(body)
@@ -266,6 +346,7 @@ def main():
     log.info("모델 워밍업 중…")
     _ensure_model().detect_full(np.zeros((640, 640, 3), np.uint8))
     log.info("워밍업 완료")
+    log.info("카드 mm 보정 로드: mmScaleCorrection=%.4f", _load_calib())
     http.server.SimpleHTTPRequestHandler.extensions_map.update(
         {".js": "text/javascript", ".mjs": "text/javascript"})
     handler = functools.partial(Handler, directory=HERE)
