@@ -5,6 +5,7 @@
 // -> NailOverlayRenderer draws the design on each nail.
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
@@ -37,13 +38,18 @@ public class NailARController : MonoBehaviour
 
     private XRCameraHandler OpenCam()
     {
-        // Try requested res; if the SDK rejects it (returns null), fall back to the safe 640x400.
-        var h = ShareCamera.OpenCamera(m_CamType, new XRResolution(Mathf.Max(320, camW), Mathf.Max(240, camH)), cameraView);
+        // Log AROUND the native OpenCamera call: if we see "calling" but never "returned",
+        // the RayNeo camera HAL is wedged (native blocks) -> needs a device reboot + single launch.
+        int rw = Mathf.Max(320, camW), rh = Mathf.Max(240, camH);
+        Debug.Log($"[NailAR] ShareCamera.OpenCamera calling ({rw}x{rh})…");
+        var h = ShareCamera.OpenCamera(m_CamType, new XRResolution(rw, rh), cameraView);
+        Debug.Log($"[NailAR] ShareCamera.OpenCamera returned {(h != null ? "handle" : "null")}");
         if (h == null && (camW != 640 || camH != 400))
         {
             Debug.LogError($"[NailAR] {camW}x{camH} unsupported -> fallback 640x400");
             camW = 640; camH = 400;
             h = ShareCamera.OpenCamera(m_CamType, new XRResolution(640, 400), cameraView);
+            Debug.Log($"[NailAR] fallback OpenCamera returned {(h != null ? "handle" : "null")}");
         }
         return h;
     }
@@ -146,6 +152,16 @@ public class NailARController : MonoBehaviour
         public int meshParallaxOn = -1;        // 1=use A+B/d per frame, 0=static offset, -1=leave
         public float pAx = -99999f, pAy = -99999f;  // parallax constant A; sentinel=leave
         public float pBx = -99999f, pBy = -99999f;  // parallax coeff B; sentinel=leave
+        // --- TRANSPORT: swap the edge endpoint without rebuilding (USB now, phone/LAN later) ---
+        public string edgeUrl = "";            // ""=leave. USB: https://127.0.0.1:8443/infer, LAN: https://<ip>:8443/infer
+        // --- LIFE-SIZE preview (reference-card scale) ---
+        public int lifesize = -1;              // 1=match the real hand's apparent size, 0=off, -1=leave
+        public float panelRadPerPx = -1f;      // radians subtended by ONE canvas px (the single unknown
+                                               // constant of the life-size equation). ~0.0008; <=0 = leave.
+                                               // TUNE THIS LIVE until the virtual hand matches the real one.
+        public float lifesizeMax = -1f;        // clamp on the zoom (safety); <=0 = leave
+        // --- RENDER GATING: hide designs while the hand moves (kills latency ghosting) ---
+        public int gate = -1;                  // 1=only render nails the server marks stable, 0=off, -1=leave
     }
     private int m_LastBakeReload = -1;
 
@@ -237,6 +253,24 @@ public class NailARController : MonoBehaviour
             if (m_CrossOn) SetCross(true, m_CrossX, m_CrossY);
             if (c.dynDepth != -1) m_DynDepth = c.dynDepth == 1;
             if (!m_DynDepth && c.depthM > 0f) SetCanvasDepth(c.depthM);
+            // --- transport: hot-swap the edge endpoint (USB <-> phone/LAN) without a rebuild ---
+            if (!string.IsNullOrEmpty(c.edgeUrl) && m_Edge != null && m_Edge.url != c.edgeUrl)
+            {
+                m_Edge.url = c.edgeUrl;
+                Debug.Log($"[NailAR] edge endpoint -> {c.edgeUrl}");
+            }
+            // --- life-size preview + render gating (log only on CHANGE, not every 0.7s poll) ---
+            if (c.lifesize != -1 && (c.lifesize == 1) != m_LifesizeOn)
+            {
+                m_LifesizeOn = c.lifesize == 1;
+                if (!m_LifesizeOn) { m_LifesizeZoom = 1f; ApplyCanvasXform(); }
+                Debug.Log($"[NailAR] lifesize -> {m_LifesizeOn}");
+            }
+            if (c.panelRadPerPx > 0f && !Mathf.Approximately(c.panelRadPerPx, m_PanelRadPerPx))
+            { m_PanelRadPerPx = c.panelRadPerPx; Debug.Log($"[NailAR] panelRadPerPx -> {m_PanelRadPerPx:F6}"); }
+            if (c.lifesizeMax > 0f) m_LifesizeMax = c.lifesizeMax;
+            if (c.gate != -1 && (c.gate == 1) != m_GateOn) { m_GateOn = c.gate == 1; Debug.Log($"[NailAR] gate -> {m_GateOn}"); }
+            if (m_Edge != null) m_Edge.wantCard = m_LifesizeOn;   // only ask for card scale when needed
             return true;
         }
         catch (Exception e) { Debug.LogWarning("[NailAR] calib parse: " + e.Message); return false; }
@@ -249,6 +283,19 @@ public class NailARController : MonoBehaviour
     // Aspect correction: camera (1280x720=1.78) is stretched into the 1280x480 canvas (2.67) then
     // rotated 90deg -> objects look horizontally squished. stretchX/Y counter it (live-tunable).
     private float m_StretchX = 1f, m_StretchY = 1f;
+    // --- LIFE-SIZE preview state ---------------------------------------------------------------
+    // Goal: the hand shown in the mirror subtends the SAME angle as the user's real hand, so the
+    // preview reads as "my actual hand at actual size" instead of a webcam thumbnail.
+    //   real hand angular size  = (P px * mmPerPx / 1000) / distM      [rad]
+    //   shown hand angular size = P px * zoom * panelRadPerPx          [rad]
+    //   => zoom = mmPerPx / (1000 * distM * panelRadPerPx)
+    // mmPerPx comes from the reference card (server), distM from the detector; panelRadPerPx is the
+    // one device constant — live-tunable via nail_calib.json so it can be dialled in on-device.
+    private bool m_LifesizeOn;
+    private float m_PanelRadPerPx = 0.0008f;   // matches the canvas rig (0.0008 * depth scale)
+    private float m_LifesizeMax = 6f;          // clamp so a bad card read can't blow up the panel
+    private float m_LifesizeZoom = 1f;         // smoothed, applied in ApplyCanvasXform
+    private bool m_GateOn;                     // render gating (only stable nails)
     private void SetCanvasDepth(float depthM)
     {
         m_Depth = depthM;
@@ -268,6 +315,7 @@ public class NailARController : MonoBehaviour
         var lp = ct.localPosition;
         ct.localPosition = new Vector3(lp.x, lp.y, m_Depth);
         float s = 0.0008f * m_Depth;   // 0.0016 @ 2 m -> keep angular size constant
+        s *= m_LifesizeZoom;           // life-size: scales feed AND overlay together (stays aligned)
         ct.localScale = new Vector3((m_FlipX ? -s : s) * m_StretchX, (m_FlipY ? -s : s) * m_StretchY, s);
     }
     private void SetStretch(float sx, float sy)
@@ -446,19 +494,30 @@ public class NailARController : MonoBehaviour
 
     private IEnumerator EnsurePermissionThenOpen()
     {
-        // Docs: "Add dynamic camera permission request."
+        Debug.Log("[NailAR] === EnsurePermissionThenOpen START ===");
+        // Dynamic camera permission. Poll with a timeout instead of an unbounded wait so a missed
+        // grant-event can't hang the coroutine forever (was a real failure mode on this device).
         if (!Permission.HasUserAuthorizedPermission(Permission.Camera))
         {
+            Debug.Log("[NailAR] requesting CAMERA permission");
             Permission.RequestUserPermission(Permission.Camera);
-            while (!Permission.HasUserAuthorizedPermission(Permission.Camera)) yield return null;
+            float tw = 0f;
+            while (!Permission.HasUserAuthorizedPermission(Permission.Camera) && tw < 15f)
+            { tw += Time.deltaTime; yield return null; }
         }
-        // Log what the RGB camera can do (surfaces in logcat as errors so release builds show it),
-        // then open at the requested resolution. Higher res = sharper mirror + finer nail detection
-        // (sensor runs 1920x1080; default 640x400 was upscaled -> soft).
+        Debug.Log($"[NailAR] CAMERA permission granted = {Permission.HasUserAuthorizedPermission(Permission.Camera)}");
+        yield return new WaitForSeconds(0.5f);   // let the camera service settle after grant/unlock
         var supp = ShareCamera.getSupportResolutions(m_CamType);
-        if (supp != null) foreach (var r in supp) Debug.LogError($"[NailAR] cam supports {r.width}x{r.height}");
-        m_Handler = OpenCam();
-        if (m_Handler == null) { Debug.LogError("ShareCamera.OpenCamera failed (permission?)"); yield break; }
+        Debug.Log($"[NailAR] getSupportResolutions -> {(supp == null ? "null" : supp.Length + " modes")}");
+        // Retry open: the RayNeo camera HAL is often transiently not-ready right after launch/unlock.
+        for (int attempt = 0; attempt < 8 && m_Handler == null; attempt++)
+        {
+            Debug.Log($"[NailAR] --- OpenCam attempt {attempt} ---");
+            m_Handler = OpenCam();
+            if (m_Handler == null) yield return new WaitForSeconds(1f);
+        }
+        if (m_Handler == null) { Debug.LogError("[NailAR] OpenCamera failed after 8 retries — reboot glasses + single launch"); yield break; }
+        Debug.Log("[NailAR] === CAMERA OPEN OK ===");
 
         // AR mode: hide the camera image so the REAL hand shows through the display.
         // (Detection still works — GrabJpeg reads m_Handler.texture, not the RawImage.)
@@ -499,9 +558,12 @@ public class NailARController : MonoBehaviour
 
 #if CALIB_APP
         startMode = (int)NailMode.Calib;   // calib app: ONLY the crosshair, nothing else
+#elif MIRROR_APP
+        startMode = (int)NailMode.MirrorMesh;  // ★ mirror test app: boots STRAIGHT into magic-mirror+design
 #elif MESH_APP
         startMode = (int)NailMode.ARMesh;  // mesh app: boots straight into the curved-mesh AR
 #endif
+        Debug.Log($"[NailAR] boot startMode = {startMode} ({(NailMode)startMode})");
         ApplyMode(startMode);            // set the initial mode preset
         m_LastCalibMode = startMode;
 
@@ -519,7 +581,7 @@ public class NailARController : MonoBehaviour
             m_CurDepth = Mathf.Lerp(m_CurDepth, m_TargetDepth, 1f - Mathf.Exp(-6f * Time.deltaTime));
             SetCanvasDepth(m_CurDepth);
         }
-#if !CALIB_APP && !MESH_APP
+#if !CALIB_APP && !MESH_APP && !MIRROR_APP
         // cycle modes with a screen/touchpad tap (debounced) — disabled in the single-mode apps
         if (Time.time - m_TapDebounce > 0.4f &&
             (Input.GetMouseButtonDown(0) || (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)))
@@ -543,9 +605,11 @@ public class NailARController : MonoBehaviour
             yield return m_Edge.Infer(jpeg, res =>
             {
                 if (res == null || !res.ok || overlay == null) return;
-                overlay.SetResults(res.nails, res.w, res.h);
-                if (grid != null) grid.SetResults(res.nails, res.w, res.h);
-                if (meshR != null) meshR.SetResults(res.nails, res.w, res.h);
+                UpdateLifesize(res);                        // card scale -> life-size preview zoom
+                var shown = GateNails(res.nails);           // render gating (hide moving nails)
+                overlay.SetResults(shown, res.w, res.h);
+                if (grid != null) grid.SetResults(shown, res.w, res.h);
+                if (meshR != null) meshR.SetResults(shown, res.w, res.h);
                 // enrollment progress -> HUD (server-composed line, e.g. "[Right] T12 I40 ... /40")
                 if (m_Mode == (int)NailMode.Enroll && res.enroll != null && res.enroll.active
                     && !string.IsNullOrEmpty(res.enroll.msg))
@@ -570,6 +634,36 @@ public class NailARController : MonoBehaviour
                 }
             });
         }
+    }
+
+    /// <summary>Render gating — drop nails the server marked unstable (hand moving).
+    /// Offload latency means a moving nail's design lags behind the hand; hiding it while in motion
+    /// is far less objectionable than a design sliding off the finger.</summary>
+    private List<NailRoi> GateNails(List<NailRoi> nails)
+    {
+        if (!m_GateOn || nails == null || nails.Count == 0) return nails;
+        var keep = new List<NailRoi>(nails.Count);
+        foreach (var n in nails) if (n.stable) keep.Add(n);
+        return keep;
+    }
+
+    /// <summary>Life-size preview — scale the mirror so the shown hand subtends the same angle as
+    /// the real hand.  zoom = mmPerPx / (1000 * distM * panelRadPerPx)   (see field docs).
+    /// Needs a reference card in frame for mmPerPx; otherwise the previous zoom is kept.</summary>
+    private void UpdateLifesize(InferResult res)
+    {
+        if (!m_LifesizeOn || res.card == null || !res.card.found || res.card.mmPerPx <= 0f) return;
+        if (res.nails == null || res.nails.Count == 0) return;
+        float dSum = 0f; int dN = 0;
+        foreach (var n in res.nails) if (n.distM > 0.01f) { dSum += n.distM; dN++; }
+        if (dN == 0) return;                       // no absolute distance -> can't solve the angle
+        float distM = dSum / dN;
+        float target = res.card.mmPerPx / (1000f * distM * Mathf.Max(1e-6f, m_PanelRadPerPx));
+        target = Mathf.Clamp(target, 0.1f, m_LifesizeMax);
+        m_LifesizeZoom = Mathf.Lerp(m_LifesizeZoom, target, 0.25f);   // smooth out card-read jitter
+        ApplyCanvasXform();
+        if ((m_LogTick++ % 15) == 0)
+            Debug.Log($"[NailAR] lifesize mmPerPx={res.card.mmPerPx:F4} dist={distM:F3} zoom={m_LifesizeZoom:F3}");
     }
 
     /// <summary>Read the camera texture into a JPEG (blit->ReadPixels; safe for OES textures).</summary>

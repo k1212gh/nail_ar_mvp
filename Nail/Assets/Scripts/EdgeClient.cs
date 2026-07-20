@@ -19,6 +19,9 @@ public struct NailRoi
     public float ex, ey;      // tip-direction unit vector
     public float len, wid;    // nail length / width (px)
     public float distM;       // camera->hand absolute distance (m) via World Landmarks (0=unknown)
+    public float lenMm, widMm; // REAL nail size (mm) — only when a reference card is in frame (?card=1)
+    public float speed;       // kalman speed (px/frame) of this nail
+    public bool stable;       // speed <= threshold → safe to render (render gating; hides latency ghosting)
     public string finger;     // "thumb"/"index"/"middle"/"ring"/"pinky" — STABLE identity
     public string hand;       // "Left"/"Right" — with finger, keys the per-nail smoothing slot
     // Identity key so each real nail keeps its OWN smoothing filter across frames. Without this,
@@ -42,6 +45,16 @@ public class EnrollStatus
     public string msg;        // ready-to-display HUD line, e.g. "[Right] T12 I40 ... /40"
 }
 
+// Reference-card scale (ISO/IEC 7810 ID-1 credit card = 85.60 x 53.98 mm), returned with ?card=1.
+// mmPerPx converts image pixels -> real millimetres, which drives the LIFE-SIZE preview zoom.
+[Serializable]
+public class CardInfo
+{
+    public bool found;
+    public float mmPerPx;     // real mm per image px (card plane); 0 when not found
+    public float longPx;      // detected card long-edge length (px) — diagnostics
+}
+
 [Serializable]
 public class InferResult
 {
@@ -50,6 +63,7 @@ public class InferResult
     public float ms;
     public List<NailRoi> nails = new List<NailRoi>();
     public EnrollStatus enroll;
+    public CardInfo card;     // present only with ?card=1
 }
 
 // Accept the edge server's self-signed cert (local dev only). edge_serve.py = HTTPS:8443.
@@ -59,9 +73,14 @@ public class EdgeClient
 {
     // edge_serve.py serves POST /infer over HTTPS:8443 (self-signed). Over USB:
     //   adb reverse tcp:8443 tcp:8443   -> url = https://127.0.0.1:8443/infer
+    // TRANSPORT: the endpoint is intentionally NOT hard-coded to USB. It is overridable at runtime
+    // via nail_calib.json {"edgeUrl": "..."} so the same build works for:
+    //   USB (now):  adb reverse tcp:8443 tcp:8443 -> https://127.0.0.1:8443/infer
+    //   Phone/LAN:  https://<host-ip>:8443/infer   (no rebuild needed)
     public string url = "https://127.0.0.1:8443/infer";
     public bool enroll;              // append ?enroll=1 (server accumulates mm samples)
     public bool enrollResetPending;  // one-shot &reset=1 on entering the Enroll mode
+    public bool wantCard;            // append ?card=1 (server returns card mmPerPx + per-nail mm)
 
     /// <summary>POST a JPEG frame, parse nail ROIs. Runs as a coroutine.</summary>
     public IEnumerator Infer(byte[] jpeg, Action<InferResult> onResult)
@@ -72,6 +91,7 @@ public class EdgeClient
             u += (u.Contains("?") ? "&" : "?") + "enroll=1";
             if (enrollResetPending) { u += "&reset=1"; enrollResetPending = false; }
         }
+        if (wantCard) u += (u.Contains("?") ? "&" : "?") + "card=1";
         using (var req = new UnityWebRequest(u, UnityWebRequest.kHttpVerbPOST))
         {
             req.uploadHandler = new UploadHandlerRaw(jpeg) { contentType = "image/jpeg" };

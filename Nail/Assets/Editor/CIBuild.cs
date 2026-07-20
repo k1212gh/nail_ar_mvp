@@ -26,7 +26,13 @@ public static class CIBuild
     // 설치 후 nail_calib.json 으로 mode=5(MirrorMesh: 매직미러+디자인) push.
     public static void BuildMirror() => Build("NailMirror_AUTO.apk", "com.DefaultCompany.NailMirror", "NailMirror", "MESH_APP");
 
-    static void Build(string outName, string overridePackage, string overrideProduct, string extraDefine)
+    // ★ 개발용 미러 테스트 빌드 — MIRROR_APP: 부팅 즉시 MirrorMesh(매직미러+디자인)로 진입,
+    // 모드 순환/그리드/calib/enroll 없음 = 실패 지점 최소. Development Build 라 Debug.Log 가
+    // logcat(태그 Unity)에 나온다(Release 는 싱크 꺼짐). 확인: adb logcat -s Unity. 배포는 BuildMirror.
+    public static void BuildMirrorDev() => Build("NailMirror_AUTO.apk", "com.DefaultCompany.NailMirror", "NailMirror", "MIRROR_APP", dev: true);
+
+    static void Build(string outName, string overridePackage, string overrideProduct, string extraDefine,
+                      bool dev = false)
     {
         PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
@@ -70,7 +76,8 @@ public static class CIBuild
             scenes = scenes,
             locationPathName = outPath,
             target = BuildTarget.Android,
-            options = BuildOptions.None,
+            // Development = Debug.Log 가 logcat 으로 나감(+프로파일러 연결). 개발 중 필수.
+            options = dev ? (BuildOptions.Development | BuildOptions.AllowDebugging) : BuildOptions.None,
         };
 
         BuildReport report = BuildPipeline.BuildPlayer(opts);

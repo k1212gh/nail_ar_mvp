@@ -13,8 +13,9 @@ import os
 import subprocess
 import sys
 
-PKG = "com.DefaultCompany.Nail"
-DST = f"/sdcard/Android/data/{PKG}/files/nail_calib.json"
+# 대상 패키지: pkg=<name> 인자 또는 NAIL_PKG 환경변수로 바꾼다(앱마다 files 디렉터리가 다름).
+#   예) python web/push_calib.py pkg=com.DefaultCompany.NailMirror mode=5
+PKG = os.environ.get("NAIL_PKG", "com.DefaultCompany.Nail")
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOCAL = os.path.join(HERE, "_calib_push.json")
 
@@ -32,10 +33,15 @@ BASE = {
     "gridPosScale": -1.0, "gridMinCutoff": -1.0, "gridBeta": -1.0,
     "crossOn": -1, "crossX": -99999.0, "crossY": -99999.0,
     "camW": -1, "camH": -1, "stretchX": -1.0, "stretchY": -1.0,
+    # 전송 계층(USB↔폰 전환): ""=그대로. USB=https://127.0.0.1:8443/infer, LAN=https://<ip>:8443/infer
+    "edgeUrl": "",
+    # 실물크기 프리뷰 + 렌더 게이팅
+    "lifesize": -1, "panelRadPerPx": -1.0, "lifesizeMax": -1.0, "gate": -1,
 }
 
 def main() -> None:
     d = dict(BASE)
+    pkg = PKG
     args = sys.argv[1:]
     if not args:                                    # 인자 없음 = 그리드 오프셋만 0으로 리셋
         d["gridOffX"], d["gridOffY"] = 0.0, 0.0
@@ -43,18 +49,22 @@ def main() -> None:
         if "=" not in a:
             print(f"skip '{a}' (need key=value)"); continue
         k, v = a.split("=", 1)
+        if k == "pkg":                              # 대상 앱 패키지 지정(특수 키)
+            pkg = v; continue
         if k not in d:
             print(f"skip unknown key '{k}'"); continue
-        # int vs float vs bool by the base type
+        # str vs bool vs int vs float — base 값의 타입으로 결정
         b = BASE[k]
-        if isinstance(b, bool):     d[k] = v.lower() in ("1", "true", "on", "yes")
+        if isinstance(b, str):      d[k] = v
+        elif isinstance(b, bool):   d[k] = v.lower() in ("1", "true", "on", "yes")
         elif isinstance(b, int):    d[k] = int(float(v))
         else:                       d[k] = float(v)
     with open(LOCAL, "w") as f:
         json.dump(d, f)
+    dst = f"/sdcard/Android/data/{pkg}/files/nail_calib.json"
     changed = {k: d[k] for k in d if d[k] != BASE[k]}
-    r = subprocess.run(["adb", "push", LOCAL, DST], capture_output=True, text=True)
-    print(f"push {changed} rc={r.returncode} {r.stderr.strip()}")
+    r = subprocess.run(["adb", "push", LOCAL, dst], capture_output=True, text=True)
+    print(f"push -> {pkg}: {changed} rc={r.returncode} {r.stderr.strip()}")
 
 if __name__ == "__main__":
     main()
