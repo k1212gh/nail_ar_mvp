@@ -338,12 +338,15 @@ public class NailARController : MonoBehaviour
 
     private void SetFeed(bool on)
     {
-        // SetActive the feed RawImage GameObject. The OES camera texture ignores color.a AND even
-        // Graphic.enabled=false kept rendering it, so deactivating the GameObject is the only reliable
-        // way to get TRUE see-through. Overlay/grid are reparented to the CANVAS (not this RawImage)
-        // in EnsurePermissionThenOpen, so they're unaffected. Detection still runs (UpdateT2d fires
-        // from the SDK updater regardless; GrabJpeg reads m_Handler.texture, not this Graphic).
-        if (cameraView != null) cameraView.gameObject.SetActive(on);
+        // SetActive the feed RawImage GameObject (see-through modes deactivate it). CRITICAL: also
+        // set the color OPAQUE when showing — EnsurePermissionThenOpen leaves it transparent (alpha 0)
+        // for see-through, so without this the MIRROR feed stays invisible and only the design shows
+        // ("one dot" symptom). The ShareCamera Texture2D respects color.a (unlike a raw OES texture).
+        if (cameraView != null)
+        {
+            cameraView.gameObject.SetActive(on);
+            if (on) cameraView.color = Color.white;   // opaque = show the mirror image
+        }
     }
 
     // Apply a full mode preset. Each mode is a self-contained config so 형 can A/B test.
