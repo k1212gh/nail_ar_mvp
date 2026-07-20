@@ -9,12 +9,14 @@
 """
 from __future__ import annotations
 
+import collections
 import functools
 import http.server
 import json
 import os
 import ssl
 import sys
+import threading
 import time
 import urllib.parse
 
@@ -280,6 +282,101 @@ def _infer_yolo(img) -> list:
     return nails
 
 
+# ---------------------------------------------------------------------------
+# 무선 모니터 — 같은 WiFi의 폰/노트북 브라우저로 실기기 카메라+검출을 실시간 확인.
+# 안경은 HTTPS:8443(USB) 그대로, 모니터만 HTTP:8080 별도(인증서 경고 없음).
+# ---------------------------------------------------------------------------
+MON_PORT = int(os.environ.get("NAIL_MON_PORT", "8080"))
+MON_ROT = os.environ.get("NAIL_MON_ROT", "cw")   # cw|ccw|none — 90° 장착 카메라 보기 보정(검출엔 무관)
+_MON = {"jpeg": b"", "nails": 0, "ms": 0.0, "frames": 0,
+        "times": collections.deque(maxlen=30), "lock": threading.Lock()}
+
+
+def _mon_fps() -> float:
+    t = _MON["times"]
+    return (len(t) - 1) / (t[-1] - t[0]) if len(t) >= 2 and t[-1] > t[0] else 0.0
+
+
+def _update_monitor(body: bytes, res: dict) -> None:
+    """프레임에 손톱 외곽/중심을 그려 모니터용 JPEG로 보관 + 통계 갱신(매 프레임)."""
+    try:
+        im = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
+        if im is None:
+            return
+        nl = res.get("nails", [])
+        for nd in nl:
+            cont = nd.get("contour")
+            if cont:
+                cv2.polylines(im, [np.array(cont, np.int32).reshape(-1, 1, 2)], True, (0, 255, 0), 2)
+            cv2.circle(im, (int(nd.get("cx", 0)), int(nd.get("cy", 0))), 4, (0, 0, 255), -1)
+        if MON_ROT == "cw":
+            im = cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)       # 90° 장착 카메라를 세워서 보기(뷰 전용)
+        elif MON_ROT == "ccw":
+            im = cv2.rotate(im, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        cv2.putText(im, f"nails={len(nl)}  fps={_mon_fps():.1f}  ms={res.get('ms', 0)}",
+                    (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        ok, enc = cv2.imencode(".jpg", im, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if ok:
+            with _MON["lock"]:
+                _MON["jpeg"] = enc.tobytes()
+                _MON["nails"], _MON["ms"] = len(nl), res.get("ms", 0.0)
+                _MON["frames"] += 1
+                _MON["times"].append(time.time())
+    except Exception:
+        pass
+
+
+_MONITOR_HTML = """<!doctype html><html><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Nail-AR 모니터</title>
+<style>html,body{margin:0;background:#0c0c0c;color:#0f0;font-family:monospace;text-align:center}
+#s{padding:10px;font-size:20px;color:#0ff}img{max-width:100%;height:auto;image-rendering:auto}</style>
+</head><body><div id=s>연결 중…</div><img id=v>
+<script>
+const v=document.getElementById('v'),s=document.getElementById('s');
+v.onload=()=>setTimeout(next,60); v.onerror=()=>setTimeout(next,400);
+function next(){v.src='/last.jpg?t='+Date.now();} next();
+async function stat(){try{const j=await(await fetch('/stats.json')).json();
+ s.textContent='nails='+j.nails+'  fps='+j.fps+'  ms='+j.ms+'  frames='+j.frames;}catch(e){s.textContent='서버 대기…';}}
+setInterval(stat,500); stat();
+</script></body></html>"""
+
+
+class MonitorHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        p = self.path.split("?")[0]
+        if p in ("/", "/monitor", "/monitor/"):
+            return self._send(_MONITOR_HTML.encode("utf-8"), "text/html; charset=utf-8")
+        if p == "/last.jpg":
+            with _MON["lock"]:
+                data = _MON["jpeg"]
+            if not data:
+                self.send_error(503, "no frame yet"); return
+            return self._send(data, "image/jpeg")
+        if p == "/stats.json":
+            with _MON["lock"]:
+                s = {"nails": _MON["nails"], "ms": _MON["ms"], "frames": _MON["frames"], "fps": round(_mon_fps(), 1)}
+            return self._send(json.dumps(s).encode(), "application/json")
+        self.send_error(404)
+
+    def _send(self, data: bytes, ctype: str):
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *a):
+        pass
+
+
+def _start_monitor():
+    srv = http.server.ThreadingHTTPServer(("0.0.0.0", MON_PORT), MonitorHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         path, _, query = self.path.partition("?")
@@ -297,33 +394,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if res.get("ok") and _calib:
                 res["calib"] = _calib_update(res, qs.get("reset", ["0"])[0] == "1")
             log.info("infer bytes=%d nails=%d ms=%s", len(body), len(res.get("nails", [])), res.get("ms"))
-            try:
-                open(os.path.join(ROOT, "_last_frame.jpg"), "wb").write(body)
-                nl = res.get("nails", [])
-                if nl:  # annotate: draws the SAME grid the glasses render, on 형's camera view,
-                        # so we share a "your view + grid" preview to calibrate size/position.
-                    im = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
-                    H, W = im.shape[:2]
-                    f_px = HandConfig().focal_ratio * W   # single source (config.py); Unity mirrors it
-                    CELL_MM, CELLS = 3.0, 7          # matches app defaults (axis-aligned graph paper)
-                    for nd in nl:
-                        cx, cy = int(nd["cx"]), int(nd["cy"])
-                        dist_m = float(nd.get("distM", 0.0))
-                        # metric cell size in px (same formula as NailGridRenderer); fallback ~ nail size
-                        ln = float(nd.get("len", 30.0))
-                        cell = f_px * (CELL_MM / 1000.0) / dist_m if dist_m > 0.01 else max(6.0, ln / CELLS)
-                        half = cell * (CELLS / 2.0)
-                        # axis-aligned NxN grid centered on the nail (cyan thin lines, bold center cross)
-                        for k in range(-(CELLS // 2), CELLS // 2 + 1):
-                            off = k * cell
-                            cv2.line(im, (int(cx - half), int(cy + off)), (int(cx + half), int(cy + off)), (255, 255, 0), 1)
-                            cv2.line(im, (int(cx + off), int(cy - half)), (int(cx + off), int(cy + half)), (255, 255, 0), 1)
-                        cv2.line(im, (int(cx - half), cy), (int(cx + half), cy), (255, 255, 0), 2)
-                        cv2.line(im, (cx, int(cy - half)), (cx, int(cy + half)), (255, 255, 0), 2)
-                        cv2.circle(im, (cx, cy), 3, (0, 0, 255), -1)   # nail center = red dot
-                    cv2.imwrite(os.path.join(ROOT, "_last_detect.jpg"), im)
-            except Exception:
-                pass
+            _update_monitor(body, res)   # WiFi 모니터용: 매 프레임 카메라+검출을 시각화해 보관
             out = json.dumps(res).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -358,11 +429,14 @@ def main():
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(S.CERT, S.KEY)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    _start_monitor()   # WiFi 무선 모니터(HTTP)
     print("=" * 60)
     print("  에지 추론 서버 (PC가 인식, 폰은 렌더)")
     print(f"  폰 접속:  https://{ip}:{PORT}/edge.html")
+    print(f"  ★ 무선 모니터(같은 WiFi 브라우저):  http://{ip}:{MON_PORT}/monitor")
     print("  방화벽 팝업 뜨면 '액세스 허용'. 종료: Ctrl+C")
     print("=" * 60)
+    log.info("무선 모니터: http://%s:%d/monitor", ip, MON_PORT)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
