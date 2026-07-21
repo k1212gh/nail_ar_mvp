@@ -39,6 +39,8 @@ BASE = {
     "useSocket": -1, "sockHost": "", "sockPort": -1, "inferInterval": -1.0,
     # 실물크기 프리뷰 + 렌더 게이팅
     "lifesize": -1, "panelRadPerPx": -1.0, "lifesizeMax": -1.0, "gate": -1,
+    # 손톱 축방향 디자인 이동(+팁/-뿌리, 길이 비율) — "디자인이 손톱보다 아래" 교정
+    "alongTip": -99.0,
 }
 
 def main() -> None:

@@ -148,6 +148,8 @@ public class NailARController : MonoBehaviour
         public float meshTiltSign = 0f;        // +1/-1 flip tilt direction; 0 = leave
         public float meshCurve = -1f;          // fallback curve (sag/width) when no bake; <=0 = leave
         public float meshScale = -1f;          // mesh design scale; <=0 = leave
+        public float alongTip = -99f;          // shift design along the nail axis (+tip/-base, frac of
+                                               // length). Fixes "design sits below the nail". -99 = leave
         public float meshBulge = 0f;           // +1/-1 bulge direction; 0 = leave
         public int bakeReload = -1;            // CHANGE the value to re-read nail_bake dir; -1 = leave
         // --- distance-adaptive parallax model: offset(d) = A + B/d (display px, px·m) ---
@@ -240,6 +242,7 @@ public class NailARController : MonoBehaviour
                 if (c.meshTiltSign != 0f) meshR.tiltSign = Mathf.Sign(c.meshTiltSign);
                 if (c.meshCurve > 0f) meshR.defaultCurve = c.meshCurve;
                 if (c.meshScale > 0f) meshR.designScale = c.meshScale;
+                if (c.alongTip > -98f) meshR.alongTip = c.alongTip;   // live-tune the axis shift
                 if (c.meshBulge != 0f) meshR.bulgeSign = Mathf.Sign(c.meshBulge);
                 // distance-adaptive parallax model
                 if (c.meshParallaxOn != -1) meshR.parallaxEnable = c.meshParallaxOn == 1;
@@ -410,7 +413,19 @@ public class NailARController : MonoBehaviour
                 SetFeed(true); SetCanvasRot(270f); SetCanvasFlip(false, true); m_DynDepth = false; SetCanvasDepth(100f);
                 if (overlay != null) overlay.show = false;
                 SetGrid(false, 0, false, false);
-                if (meshR != null) { meshR.show = true; meshR.parallaxEnable = false; meshR.calibOffset = Vector2.zero; meshR.ReloadBake(); }
+                // FULLY specify the mapping — mirror must NOT inherit stale see-through calibration
+                // (rotQuadrant defaults to 1, calibScale/mirror may carry over from another mode).
+                // That inheritance was the root cause of the small mis-alignments.
+                SetOverlay(0, false, false, 0f);          // rotQuadrant=0 -> 1:1 with the feed image
+                if (meshR != null)
+                {
+                    meshR.show = true;
+                    meshR.mirrorMode = true;              // image-space compositing: no parallax/metric
+                    meshR.parallaxEnable = false;
+                    meshR.calibOffset = Vector2.zero;
+                    meshR.calibScale = 1f;                // no SPAAM spread in mirror
+                    meshR.ReloadBake();
+                }
                 break;
         }
         ShowHud(enroll ? $"[{m_Mode}] Enroll — 손등을 15~50cm에서 천천히" : $"[{m_Mode}] {(NailMode)m_Mode}");

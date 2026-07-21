@@ -28,6 +28,17 @@ public class NailMeshRenderer : MonoBehaviour
     public float designRotDeg = 0f;
     [Range(0.3f, 3f)] public float designScale = 1.15f;
 
+    // Shift the design ALONG the nail's own axis, as a fraction of nail length.
+    // +tip / -base. Needed because the detected centre is DIP+0.6*(TIP-DIP), i.e. slightly
+    // PROXIMAL of the visible nail plate -> the design reads as "a bit below the nail".
+    // Pose-independent (follows each nail's axis), unlike a global calibOffset.
+    [Range(-0.5f, 0.5f)] public float alongTip = 0f;
+
+    // MIRROR mode = pure image-space compositing on the camera feed: no eye parallax, no metric
+    // (mm+distance) sizing, no SPAAM spread. One flag neutralises the whole see-through pipeline
+    // so mirror can't inherit stale calibration state (the root cause of the small mis-alignments).
+    public bool mirrorMode = false;
+
     // --- Distance-adaptive parallax model: offset(d) = A + B/d --------------------------------
     // The camera-eye parallax error scales with 1/distance, so a single fixed calibOffset only
     // aligns at one distance. With per-nail metric distM (from the server) we evaluate the
@@ -42,6 +53,7 @@ public class NailMeshRenderer : MonoBehaviour
     // Effective display-px offset for a nail at distance d (m); static fallback if no model/dist.
     private Vector2 OffsetFor(float distM)
     {
+        if (mirrorMode) return Vector2.zero;   // mirror: design sits exactly where the nail is in the feed
         if (parallaxEnable && distM > 0.01f) return parallaxA + parallaxB / distM;
         return calibOffset;
     }
@@ -160,7 +172,9 @@ public class NailMeshRenderer : MonoBehaviour
             // runtime pose-only sizing: expected camera px from profile mm + distance.
             // (fallback: the server's per-frame px when we have no profile/distance)
             float fpx = focalRatio * m_ImgW;
-            bool metric = bake != null && r.distM > 0.01f;
+            // MIRROR: size straight from the detected px (matches the feed exactly). Metric sizing
+            // (mm + distM) is a see-through feature and injects distM estimation error here.
+            bool metric = !mirrorMode && bake != null && r.distM > 0.01f;
             float lenCam = metric ? fpx * bake.lenMm * 0.001f / r.distM : r.len;
             float widCam = metric ? fpx * bake.widMm * 0.001f / r.distM : r.wid;
 
@@ -187,7 +201,11 @@ public class NailMeshRenderer : MonoBehaviour
             var tex = bake != null ? bake.tex : FallbackTex(r.finger);
             if (!Mathf.Approximately(e.curve, curve)) { e.mf.sharedMesh = BuildNailMesh(curve, bulgeSign); e.curve = curve; }
             if (!ReferenceEquals(e.tex, tex)) { e.mat.mainTexture = tex; e.tex = tex; }
-            e.pos = center + OffsetFor(r.distM); e.size = new Vector2(w, h);
+            // shift along the nail's own axis (fixes the "design sits a bit below the nail" bias)
+            Vector2 alongVec = Vector2.zero;
+            if (Mathf.Abs(alongTip) > 1e-4f && axis.sqrMagnitude > 1e-4f)
+                alongVec = axis.normalized * (alongTip * h);   // h = design length in canvas px
+            e.pos = center + alongVec + OffsetFor(r.distM); e.size = new Vector2(w, h);
             e.rot = deg; e.tilt = tilt; e.lastSeen = Time.time;
         }
     }
