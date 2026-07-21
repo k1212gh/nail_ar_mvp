@@ -158,6 +158,11 @@ public class NailARController : MonoBehaviour
         // together and stay registered.
         public int guide = -1;                 // 1=crop to the target nail, 0=whole hand, -1=leave
         public float guideZoom = -1f;          // magnification used while guiding; <=0 = leave
+        // ADAPTIVE zoom: hold the worked nail at a constant on-screen size whatever the hand
+        // distance, so the working view never changes scale as the hand moves in/out.
+        public int guideAuto = -1;             // 1=auto zoom, 0=fixed guideZoom, -1=leave
+        public float guideTarget = -1f;        // nail length as a fraction of screen height (0.5 = half)
+        public float guideZoomMin = -1f, guideZoomMax = -1f;
         public float predictMs = -1f;          // latency compensation (ms). 0=off, ~150 = cancel the
                                                // offload lag so the design keeps up with the hand
         public float meshBulge = 0f;           // +1/-1 bulge direction; 0 = leave
@@ -306,6 +311,11 @@ public class NailARController : MonoBehaviour
             { m_ManualZoom = c.zoom; ApplyCanvasXform(); Debug.Log($"[NailAR] zoom -> {m_ManualZoom:F2}"); }
             if (c.guideZoom > 0f && !Mathf.Approximately(c.guideZoom, m_GuideZoom))
             { m_GuideZoom = c.guideZoom; ApplyCanvasXform(); Debug.Log($"[NailAR] guideZoom -> {m_GuideZoom:F2}"); }
+            if (c.guideAuto != -1 && (c.guideAuto == 1) != m_GuideAuto)
+            { m_GuideAuto = c.guideAuto == 1; Debug.Log($"[NailAR] guideAuto -> {m_GuideAuto}"); }
+            if (c.guideTarget > 0f) m_GuideTarget = c.guideTarget;
+            if (c.guideZoomMin > 0f) m_GuideZoomMin = c.guideZoomMin;
+            if (c.guideZoomMax > 0f) m_GuideZoomMax = c.guideZoomMax;
             if (c.guide != -1 && (c.guide == 1) != m_GuideOn)
             {
                 m_GuideOn = c.guide == 1;
@@ -344,6 +354,9 @@ public class NailARController : MonoBehaviour
     private float m_ManualZoom = 1f;           // crop-in magnification of the mirror
     private bool m_GuideOn;                    // digital loupe: centre + magnify one nail
     private float m_GuideZoom = 3f;
+    private bool m_GuideAuto = true;           // keep the nail a constant size on screen
+    private float m_GuideTarget = 0.45f;       // nail length ≈ 45% of screen height
+    private float m_GuideZoomMin = 1.5f, m_GuideZoomMax = 8f;
     private Vector2 m_GuideCenter;             // canvas-local position of the tracked nail
     private bool m_HaveGuideCenter;
     private int m_MonoMode;                    // 0=both eyes, 1=left, 2=right
@@ -434,13 +447,21 @@ public class NailARController : MonoBehaviour
         if (rect == null) return;
         var size = rect.rect.size;
         float cxImg = res.w * 0.5f, cyImg = res.h * 0.5f;
-        float bestD = float.MaxValue; float bx = 0f, by = 0f; bool found = false;
+        float bestD = float.MaxValue; float bx = 0f, by = 0f, bLen = 0f; bool found = false;
         foreach (var n in res.nails)
         {
             float dx = n.cx - cxImg, dy = n.cy - cyImg, d = dx * dx + dy * dy;
-            if (d < bestD) { bestD = d; bx = n.cx; by = n.cy; found = true; }
+            if (d < bestD) { bestD = d; bx = n.cx; by = n.cy; bLen = n.len; found = true; }
         }
         if (!found) return;
+        // ADAPTIVE zoom: a nail that is `bLen` px tall in a `res.h` px frame should cover
+        // `m_GuideTarget` of the screen -> zoom = target * imgH / nailLen. Hand moves closer ->
+        // nail gets bigger in the frame -> zoom drops, so the working view stays the same size.
+        if (m_GuideAuto && bLen > 1f)
+        {
+            float z = Mathf.Clamp(m_GuideTarget * res.h / bLen, m_GuideZoomMin, m_GuideZoomMax);
+            m_GuideZoom = Mathf.Lerp(m_GuideZoom, z, 0.15f);   // smooth so it doesn't pump
+        }
         float nx = Mathf.Clamp01(bx / Mathf.Max(1, res.w)), ny = Mathf.Clamp01(by / Mathf.Max(1, res.h));
         var target = new Vector2((nx - 0.5f) * size.x, -(ny - 0.5f) * size.y);   // mirror mapping (q=0)
         m_GuideCenter = m_HaveGuideCenter ? Vector2.Lerp(m_GuideCenter, target, 0.3f) : target;

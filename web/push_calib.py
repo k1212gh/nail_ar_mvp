@@ -43,6 +43,8 @@ BASE = {
     "alongTip": -99.0,
     # 보기: 수동 확대 / 가이드 루페(손톱 중심 크롭+확대) / 단안(0=양안,1=좌,2=우)
     "zoom": -1.0, "guide": -1, "guideZoom": -1.0, "mono": -1,
+    # 능동 확대: 손 거리와 무관하게 손톱을 화면에서 일정 크기로 유지
+    "guideAuto": -1, "guideTarget": -1.0, "guideZoomMin": -1.0, "guideZoomMax": -1.0,
     # 지연 보상 예측(ms). 0=끔, ~150=오프로드 지연 상쇄
     "predictMs": -1.0,
 }
