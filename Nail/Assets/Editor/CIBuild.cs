@@ -31,6 +31,11 @@ public static class CIBuild
     // logcat(태그 Unity)에 나온다(Release 는 싱크 꺼짐). 확인: adb logcat -s Unity. 배포는 BuildMirror.
     public static void BuildMirrorDev() => Build("NailMirror_AUTO.apk", "com.DefaultCompany.NailMirror", "NailMirror", "MIRROR_APP", dev: true);
 
+    // ★ 가이드 앱(정밀 작업 보조) — 부팅 즉시 "단안 확대 루페": 한 눈은 손톱 확대+디자인 가이드,
+    // 다른 눈은 실제 손을 그대로 본다. 별도 패키지라 미러 앱과 side-by-side 설치.
+    // 런타임 조절: push_calib guide/guideZoom/mono/zoom.
+    public static void BuildGuideDev() => Build("NailGuide_AUTO.apk", "com.DefaultCompany.NailGuide", "NailGuide", "MIRROR_APP;GUIDE_APP", dev: true);
+
     static void Build(string outName, string overridePackage, string overrideProduct, string extraDefine,
                       bool dev = false)
     {

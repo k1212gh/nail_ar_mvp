@@ -26,6 +26,8 @@ public struct NailRoi
     public float lenMm, widMm; // REAL nail size (mm) — only when a reference card is in frame (?card=1)
     public float speed;       // kalman speed (px/frame) of this nail
     public bool stable;       // speed <= threshold → safe to render (render gating; hides latency ghosting)
+    public float vx, vy;      // kalman velocity in IMAGE px/SECOND — drives latency-compensating
+                              // prediction on the client (pos + v*(age+predict)), like VR reprojection
     public string finger;     // "thumb"/"index"/"middle"/"ring"/"pinky" — STABLE identity
     public string hand;       // "Left"/"Right" — with finger, keys the per-nail smoothing slot
     // Identity key so each real nail keeps its OWN smoothing filter across frames. Without this,

@@ -41,6 +41,10 @@ BASE = {
     "lifesize": -1, "panelRadPerPx": -1.0, "lifesizeMax": -1.0, "gate": -1,
     # 손톱 축방향 디자인 이동(+팁/-뿌리, 길이 비율) — "디자인이 손톱보다 아래" 교정
     "alongTip": -99.0,
+    # 보기: 수동 확대 / 가이드 루페(손톱 중심 크롭+확대) / 단안(0=양안,1=좌,2=우)
+    "zoom": -1.0, "guide": -1, "guideZoom": -1.0, "mono": -1,
+    # 지연 보상 예측(ms). 0=끔, ~150=오프로드 지연 상쇄
+    "predictMs": -1.0,
 }
 
 def main() -> None:

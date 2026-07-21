@@ -39,6 +39,15 @@ public class NailMeshRenderer : MonoBehaviour
     // so mirror can't inherit stale calibration state (the root cause of the small mis-alignments).
     public bool mirrorMode = false;
 
+    // --- Latency compensation (late-stage reprojection) --------------------------------------
+    // The offload pipeline (capture -> encode -> detect -> render) lags ~150-250 ms, so a moving
+    // nail's design trails the hand. The server sends each nail's velocity (px/s); we draw at
+    // pos + v*(age + predictSec) so the design lands where the nail IS, not where it was.
+    // Safe by construction for our use case: while drawing, the hand is nearly still -> v≈0 -> no
+    // prediction error exactly when precision matters most.
+    public float predictSec = 0f;        // pipeline latency to cancel (s). 0 = off
+    public float maxPredictSec = 0.25f;  // hard cap so occlusion/stale data can't fling the design
+
     // --- Distance-adaptive parallax model: offset(d) = A + B/d --------------------------------
     // The camera-eye parallax error scales with 1/distance, so a single fixed calibOffset only
     // aligns at one distance. With per-nail metric distM (from the server) we evaluate the
@@ -93,6 +102,7 @@ public class NailMeshRenderer : MonoBehaviour
     {
         public GameObject go; public MeshFilter mf; public MeshRenderer mr; public Material mat;
         public Vector2 pos, size; public float rot, tilt; public float lastSeen = -999f;
+        public Vector2 vel;   // canvas-local px/sec (for latency-compensating prediction)
         public bool placed; public float curve = -1f; public Texture2D tex;
     }
     private readonly Dictionary<string, Entry> m_Entries = new Dictionary<string, Entry>();
@@ -207,6 +217,12 @@ public class NailMeshRenderer : MonoBehaviour
                 alongVec = axis.normalized * (alongTip * h);   // h = design length in canvas px
             e.pos = center + alongVec + OffsetFor(r.distM); e.size = new Vector2(w, h);
             e.rot = deg; e.tilt = tilt; e.lastSeen = Time.time;
+            // velocity -> canvas space by mapping a point a short step ahead and differencing, so it
+            // inherits whatever rotQuadrant/mirror/scale the position mapping uses (no duplicate math).
+            const float kVdt = 0.1f;
+            e.vel = (Mathf.Abs(r.vx) > 0.01f || Mathf.Abs(r.vy) > 0.01f)
+                ? (MapNormToLocal((r.cx + r.vx * kVdt) / m_ImgW, (r.cy + r.vy * kVdt) / m_ImgH, q, size) - center) / kVdt
+                : Vector2.zero;
         }
     }
 
@@ -298,7 +314,13 @@ public class NailMeshRenderer : MonoBehaviour
             e.mat.SetFloat("_GlossStrength", glossStrength);
             e.mat.SetFloat("_GlossPower", glossPower);
             var tr = e.go.transform;
-            var targetPos = new Vector3(e.pos.x, e.pos.y, 0f);
+            // latency compensation: extrapolate along the nail's velocity for the time already
+            // elapsed since this result plus the pipeline lag. Capped so stale/occluded data can't
+            // fling the design away; when the hand is still (v≈0) this contributes nothing.
+            Vector2 p = e.pos;
+            if (predictSec > 0f && e.vel.sqrMagnitude > 1e-6f)
+                p += e.vel * Mathf.Min((Time.time - e.lastSeen) + predictSec, maxPredictSec);
+            var targetPos = new Vector3(p.x, p.y, 0f);
             var targetRot = Quaternion.Euler(0f, 0f, e.rot) * Quaternion.Euler(e.tilt * tiltSign, 0f, 0f);
             var targetScale = new Vector3(e.size.x, e.size.y, e.size.x);   // bulge scales with width
             if (!e.placed) { tr.localPosition = targetPos; tr.localScale = targetScale; tr.localRotation = targetRot; e.placed = true; }

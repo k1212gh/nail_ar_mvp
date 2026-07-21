@@ -150,6 +150,16 @@ public class NailARController : MonoBehaviour
         public float meshScale = -1f;          // mesh design scale; <=0 = leave
         public float alongTip = -99f;          // shift design along the nail axis (+tip/-base, frac of
                                                // length). Fixes "design sits below the nail". -99 = leave
+        // --- viewing comfort ---
+        public float zoom = -1f;               // manual mirror zoom (crop-in). 1=as-is, 1.5=bigger; <=0 leave
+        public int mono = -1;                  // 0=both eyes, 1=LEFT eye only, 2=RIGHT eye only, -1=leave
+        // GUIDE (digital loupe): centre the view on ONE nail and magnify -> a working close-up for
+        // drawing (start point / outline guidance). Feed+design share the canvas, so both magnify
+        // together and stay registered.
+        public int guide = -1;                 // 1=crop to the target nail, 0=whole hand, -1=leave
+        public float guideZoom = -1f;          // magnification used while guiding; <=0 = leave
+        public float predictMs = -1f;          // latency compensation (ms). 0=off, ~150 = cancel the
+                                               // offload lag so the design keeps up with the hand
         public float meshBulge = 0f;           // +1/-1 bulge direction; 0 = leave
         public int bakeReload = -1;            // CHANGE the value to re-read nail_bake dir; -1 = leave
         // --- distance-adaptive parallax model: offset(d) = A + B/d (display px, px·m) ---
@@ -243,6 +253,7 @@ public class NailARController : MonoBehaviour
                 if (c.meshCurve > 0f) meshR.defaultCurve = c.meshCurve;
                 if (c.meshScale > 0f) meshR.designScale = c.meshScale;
                 if (c.alongTip > -98f) meshR.alongTip = c.alongTip;   // live-tune the axis shift
+                if (c.predictMs >= 0f) meshR.predictSec = c.predictMs * 0.001f;   // latency compensation
                 if (c.meshBulge != 0f) meshR.bulgeSign = Mathf.Sign(c.meshBulge);
                 // distance-adaptive parallax model
                 if (c.meshParallaxOn != -1) meshR.parallaxEnable = c.meshParallaxOn == 1;
@@ -290,6 +301,19 @@ public class NailARController : MonoBehaviour
             { m_PanelRadPerPx = c.panelRadPerPx; Debug.Log($"[NailAR] panelRadPerPx -> {m_PanelRadPerPx:F6}"); }
             if (c.lifesizeMax > 0f) m_LifesizeMax = c.lifesizeMax;
             if (c.gate != -1 && (c.gate == 1) != m_GateOn) { m_GateOn = c.gate == 1; Debug.Log($"[NailAR] gate -> {m_GateOn}"); }
+            // --- viewing: manual zoom / guide loupe / mono ---
+            if (c.zoom > 0f && !Mathf.Approximately(c.zoom, m_ManualZoom))
+            { m_ManualZoom = c.zoom; ApplyCanvasXform(); Debug.Log($"[NailAR] zoom -> {m_ManualZoom:F2}"); }
+            if (c.guideZoom > 0f && !Mathf.Approximately(c.guideZoom, m_GuideZoom))
+            { m_GuideZoom = c.guideZoom; ApplyCanvasXform(); Debug.Log($"[NailAR] guideZoom -> {m_GuideZoom:F2}"); }
+            if (c.guide != -1 && (c.guide == 1) != m_GuideOn)
+            {
+                m_GuideOn = c.guide == 1;
+                if (!m_GuideOn) m_HaveGuideCenter = false;   // back to whole-hand view
+                ApplyCanvasXform();
+                Debug.Log($"[NailAR] guide(loupe) -> {m_GuideOn}");
+            }
+            if (c.mono != -1 && c.mono != m_MonoMode) SetMono(c.mono);
             if (m_Edge != null) m_Edge.wantCard = m_LifesizeOn;   // only ask for card scale when needed
             return true;
         }
@@ -316,6 +340,15 @@ public class NailARController : MonoBehaviour
     private float m_LifesizeMax = 6f;          // clamp so a bad card read can't blow up the panel
     private float m_LifesizeZoom = 1f;         // smoothed, applied in ApplyCanvasXform
     private bool m_GateOn;                     // render gating (only stable nails)
+    // --- viewing: manual zoom, GUIDE loupe (centre on one nail), mono/stereo ---
+    private float m_ManualZoom = 1f;           // crop-in magnification of the mirror
+    private bool m_GuideOn;                    // digital loupe: centre + magnify one nail
+    private float m_GuideZoom = 3f;
+    private Vector2 m_GuideCenter;             // canvas-local position of the tracked nail
+    private bool m_HaveGuideCenter;
+    private int m_MonoMode;                    // 0=both eyes, 1=left, 2=right
+    private Camera m_MonoCam;
+    private const int k_MonoLayer = 31;        // dedicated layer so only the mono camera draws the canvas
     private void SetCanvasDepth(float depthM)
     {
         m_Depth = depthM;
@@ -332,12 +365,89 @@ public class NailARController : MonoBehaviour
     {
         if (cameraView == null || cameraView.canvas == null) return;
         var ct = cameraView.canvas.transform;
-        var lp = ct.localPosition;
-        ct.localPosition = new Vector3(lp.x, lp.y, m_Depth);
         float s = 0.0008f * m_Depth;   // 0.0016 @ 2 m -> keep angular size constant
         s *= m_LifesizeZoom;           // life-size: scales feed AND overlay together (stays aligned)
+        s *= m_ManualZoom;             // manual crop-in
+        if (m_GuideOn) s *= m_GuideZoom;                       // loupe magnification
+        // GUIDE: slide the canvas so the tracked nail sits at the centre of view. Because the feed
+        // and the design are both children of this canvas, they magnify/shift together -> the design
+        // stays glued to the nail no matter how far we zoom in.
+        Vector2 shift = Vector2.zero;
+        if (m_GuideOn && m_HaveGuideCenter)
+        {
+            var c = m_GuideCenter;
+            shift = new Vector2(-c.x * (m_FlipX ? -s : s) * m_StretchX,
+                                -c.y * (m_FlipY ? -s : s) * m_StretchY);
+            shift = Quaternion.Euler(0f, 0f, m_CanvasRot) * shift;   // canvas is rotated; rotate the shift too
+        }
+        ct.localPosition = new Vector3(shift.x, shift.y, m_Depth);
         ct.localScale = new Vector3((m_FlipX ? -s : s) * m_StretchX, (m_FlipY ? -s : s) * m_StretchY, s);
     }
+    // MONO: draw the mirror/guide into ONE eye only. The other eye keeps a clear view of the real
+    // hand — the jeweller's-loupe pattern, and it sidesteps stereo fusion discomfort entirely.
+    // Implemented by moving the canvas to its own layer that only a per-eye camera renders.
+    // Fully reversible at runtime (push mono=0) so a bad result never needs a rebuild.
+    private void SetMono(int mode)
+    {
+        if (cameraView == null || cameraView.canvas == null) return;
+        var canvasGo = cameraView.canvas.gameObject;
+        var main = Camera.main;
+        m_MonoMode = mode;
+        if (mode <= 0)
+        {
+            SetLayerRecursive(canvasGo, 0);
+            if (main != null) main.cullingMask |= (1 << k_MonoLayer) | 1;
+            if (m_MonoCam != null) { Destroy(m_MonoCam.gameObject); m_MonoCam = null; }
+            Debug.Log("[NailAR] mono -> BOTH eyes");
+            return;
+        }
+        if (main == null) { Debug.LogWarning("[NailAR] mono: no Camera.main"); return; }
+        SetLayerRecursive(canvasGo, k_MonoLayer);
+        main.cullingMask &= ~(1 << k_MonoLayer);      // stereo camera stops drawing the canvas
+        if (m_MonoCam == null)
+        {
+            var go = new GameObject("MonoCanvasCam");
+            go.transform.SetParent(main.transform, false);
+            m_MonoCam = go.AddComponent<Camera>();
+            m_MonoCam.clearFlags = CameraClearFlags.Nothing;
+            m_MonoCam.cullingMask = 1 << k_MonoLayer;
+            m_MonoCam.depth = main.depth + 1;
+            m_MonoCam.nearClipPlane = main.nearClipPlane;
+            m_MonoCam.farClipPlane = main.farClipPlane;
+        }
+        m_MonoCam.stereoTargetEye = (mode == 2) ? StereoTargetEyeMask.Right : StereoTargetEyeMask.Left;
+        Debug.Log($"[NailAR] mono -> {(mode == 2 ? "RIGHT" : "LEFT")} eye only");
+    }
+    private static void SetLayerRecursive(GameObject go, int layer)
+    {
+        go.layer = layer;
+        foreach (Transform t in go.transform) SetLayerRecursive(t.gameObject, layer);
+    }
+
+    // GUIDE loupe: track the nail nearest the image centre (the one being worked on) and remember
+    // where it lands on the canvas, so ApplyCanvasXform can centre + magnify on it.
+    private void UpdateGuideCenter(InferResult res)
+    {
+        if (!m_GuideOn || res.nails == null || res.nails.Count == 0) return;
+        if (cameraView == null || cameraView.canvas == null) return;
+        var rect = cameraView.canvas.GetComponent<RectTransform>();
+        if (rect == null) return;
+        var size = rect.rect.size;
+        float cxImg = res.w * 0.5f, cyImg = res.h * 0.5f;
+        float bestD = float.MaxValue; float bx = 0f, by = 0f; bool found = false;
+        foreach (var n in res.nails)
+        {
+            float dx = n.cx - cxImg, dy = n.cy - cyImg, d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; bx = n.cx; by = n.cy; found = true; }
+        }
+        if (!found) return;
+        float nx = Mathf.Clamp01(bx / Mathf.Max(1, res.w)), ny = Mathf.Clamp01(by / Mathf.Max(1, res.h));
+        var target = new Vector2((nx - 0.5f) * size.x, -(ny - 0.5f) * size.y);   // mirror mapping (q=0)
+        m_GuideCenter = m_HaveGuideCenter ? Vector2.Lerp(m_GuideCenter, target, 0.3f) : target;
+        m_HaveGuideCenter = true;
+        ApplyCanvasXform();
+    }
+
     private void SetStretch(float sx, float sy)
     {
         if (sx > 0f) m_StretchX = sx;
@@ -600,6 +710,15 @@ public class NailARController : MonoBehaviour
 #endif
         Debug.Log($"[NailAR] boot startMode = {startMode} ({(NailMode)startMode})");
         ApplyMode(startMode);            // set the initial mode preset
+#if GUIDE_APP
+        // GUIDE app = single-eye magnified working view (jeweller's-loupe pattern): one eye shows the
+        // zoomed nail + design guide, the other keeps a clear view of the real hand.
+        m_GuideOn = true;
+        m_GateOn = false;                // never hide the guide while the hand moves
+        SetMono(1);                      // LEFT eye only (push mono=0/2 to change at runtime)
+        ApplyCanvasXform();
+        Debug.Log("[NailAR] GUIDE app: loupe + mono(left)");
+#endif
         m_LastCalibMode = startMode;
 
         m_Running = true;
@@ -666,6 +785,11 @@ public class NailARController : MonoBehaviour
         overlay.SetResults(shown, res.w, res.h);
         if (grid != null) grid.SetResults(shown, res.w, res.h);
         if (meshR != null) meshR.SetResults(shown, res.w, res.h);
+        UpdateGuideCenter(res);                     // loupe: re-centre on the worked nail
+        // designs are created at runtime as canvas children -> they land on the DEFAULT layer and
+        // would leak into both eyes. Re-stamp the mono layer after each update.
+        if (m_MonoMode > 0 && cameraView != null && cameraView.canvas != null)
+            SetLayerRecursive(cameraView.canvas.gameObject, k_MonoLayer);
         if (m_Mode == (int)NailMode.Enroll && res.enroll != null && res.enroll.active
             && !string.IsNullOrEmpty(res.enroll.msg))
             ShowHud(res.enroll.done ? res.enroll.msg + "  -> PC: bake 후 push" : res.enroll.msg);

@@ -14,6 +14,7 @@ KLT 광류를 쓰려면 update_with_flow(prev_gray, cur_gray, pts)를 추가해
 """
 from __future__ import annotations
 
+import time
 from typing import Dict, Optional, Tuple
 
 import cv2
@@ -22,6 +23,9 @@ import numpy as np
 
 class _CenterKalman:
     """[x, y, vx, vy] 상태의 상수속도 칼만 필터."""
+
+    dt: float = 0.0          # 실측 프레임 간격(초) — 속도 px/frame → px/초 환산용
+    _last_t = None
 
     def __init__(self, x, y, q=1e-2, r=1e-1):
         kf = cv2.KalmanFilter(4, 2)
@@ -43,6 +47,14 @@ class _CenterKalman:
         return float(p[0, 0]), float(p[1, 0])   # (4,1) 배열 → 0-d 스칼라 인덱싱 (numpy>=2 호환)
 
     def correct(self, x, y) -> Tuple[float, float]:
+        # 실제 프레임 간격(dt)을 추적한다: 칼만 속도는 px/frame 이라, 지연보상 예측에 쓰려면
+        # px/초로 환산해야 한다(프레임률이 변하면 예측이 그만큼 틀어짐).
+        now = time.time()
+        if self._last_t is not None:
+            dt = now - self._last_t
+            if 0.005 < dt < 1.0:                      # 이상치(첫 프레임·긴 정지) 배제
+                self.dt = dt if self.dt <= 0 else (0.7 * self.dt + 0.3 * dt)
+        self._last_t = now
         m = np.array([[np.float32(x)], [np.float32(y)]])
         c = self.kf.correct(m)
         self.misses = 0
@@ -52,6 +64,12 @@ class _CenterKalman:
         """현재 추정 속도 크기(px/frame). 렌더 게이팅(손 정지 판정)에 사용."""
         s = self.kf.statePost
         return float(np.hypot(s[2, 0], s[3, 0]))
+
+    def velocity_per_sec(self) -> Tuple[float, float]:
+        """속도 벡터 (px/초). 클라이언트 지연보상 예측용: pos + v·(경과+예측시간)."""
+        s = self.kf.statePost
+        dt = self.dt if self.dt > 1e-3 else 0.125      # 미측정 시 8fps 가정
+        return float(s[2, 0] / dt), float(s[3, 0] / dt)
 
 
 class NailTracker:
@@ -82,6 +100,11 @@ class NailTracker:
         """가장 최근 평활화 후 이 손가락의 칼만 속도 크기(px/frame). 필터 없으면 0."""
         kf = self._filters.get(self._key(geom))
         return kf.speed() if kf is not None else 0.0
+
+    def velocity_per_sec(self, geom) -> Tuple[float, float]:
+        """이 손가락의 속도 벡터 (px/초). 클라 지연보상 예측용. 필터 없으면 (0,0)."""
+        kf = self._filters.get(self._key(geom))
+        return kf.velocity_per_sec() if kf is not None else (0.0, 0.0)
 
     def predict_missing(self, seen_keys) -> Dict[str, tuple]:
         """이번 프레임에 검출 안 된 손가락은 예측으로 위치 유지.

@@ -104,6 +104,7 @@ def _infer_hands(img) -> list:
         sx, sy = trk.smooth(geom)         # 칼만 시간융합(이전 결과로 가산)
         seen.add(trk._key(geom))
         spd = trk.speed(geom)             # 손 정지 판정용 속도(px/frame)
+        vx, vy = trk.velocity_per_sec(geom)   # 지연보상 예측용 속도(px/초)
         ex, ey = geom.axis_major
         cont = []
         if getattr(geom, "contour", None) is not None:
@@ -118,6 +119,7 @@ def _infer_hands(img) -> list:
             "extended": round(float(getattr(roi, "extended", 1.0)), 1),
             "speed": round(float(spd), 2),
             "stable": bool(spd <= _STABLE_PX),   # 렌더 게이팅: 손 정지 시만 True(이중상 억제)
+            "vx": round(float(vx), 1), "vy": round(float(vy), 1),   # px/초 — 클라 지연보상 예측
             "contour": cont,
         })
     trk.predict_missing(seen)             # 가려진 손가락 예측기 진행
