@@ -7,6 +7,10 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -110,5 +114,94 @@ public class EdgeClient
             catch (Exception e) { Debug.LogWarning("EdgeClient parse: " + e.Message); }
             onResult?.Invoke(res);
         }
+    }
+}
+
+// Raw TCP socket transport (B') — persistent connection kills the per-frame TLS handshake that
+// caps HTTP at ~2-3 fps. Protocol:  request [4B total-len BE][1B flags(bit0=card)][JPEG] ,
+// response [4B len BE][JSON]. Plaintext (LAN/USB). Socket I/O runs on a background thread; the
+// coroutine submits a frame then polls Done (frames-in-flight = 1).
+public class EdgeSocketClient
+{
+    public string host = "127.0.0.1";
+    public int port = 8444;
+    public bool wantCard;
+
+    TcpClient _cli;
+    NetworkStream _s;
+    Thread _worker;
+    volatile bool _run;
+
+    readonly object _lock = new object();
+    byte[] _reqJpeg;
+    string _resp;
+    bool _reqPending, _resDone, _resErr;
+
+    public void Start()
+    {
+        if (_worker != null && _worker.IsAlive) return;
+        _run = true;
+        _worker = new Thread(Worker) { IsBackground = true };
+        _worker.Start();
+    }
+    public void Stop() { _run = false; try { _cli?.Close(); } catch { } }
+
+    // main thread: hand off a frame, then poll Done/Err/Resp
+    public void Submit(byte[] jpeg)
+    {
+        lock (_lock) { _reqJpeg = jpeg; _reqPending = true; _resDone = false; _resErr = false; }
+    }
+    public bool Done { get { lock (_lock) { return _resDone; } } }
+    public bool Err  { get { lock (_lock) { return _resErr; } } }
+    public string Resp { get { lock (_lock) { return _resp; } } }
+
+    void Worker()
+    {
+        while (_run)
+        {
+            byte[] job = null;
+            lock (_lock) { if (_reqPending) { job = _reqJpeg; _reqPending = false; } }
+            if (job == null) { Thread.Sleep(2); continue; }
+            try
+            {
+                EnsureConn();
+                WriteFrame(job);
+                string r = ReadFrame();
+                lock (_lock) { _resp = r; _resDone = true; }
+            }
+            catch (Exception)
+            {
+                try { _cli?.Close(); } catch { }
+                _cli = null; _s = null;
+                lock (_lock) { _resErr = true; _resDone = true; }
+            }
+        }
+    }
+
+    void EnsureConn()
+    {
+        if (_cli != null && _cli.Connected) return;
+        _cli = new TcpClient { NoDelay = true };
+        _cli.Connect(host, port);
+        _s = _cli.GetStream();
+    }
+    void WriteFrame(byte[] jpg)
+    {
+        int total = jpg.Length + 1;   // 1 flags byte + payload
+        _s.Write(BitConverter.GetBytes(IPAddress.HostToNetworkOrder(total)), 0, 4);
+        _s.WriteByte((byte)(wantCard ? 1 : 0));
+        _s.Write(jpg, 0, jpg.Length);
+        _s.Flush();
+    }
+    string ReadFrame()
+    {
+        int n = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(ReadN(4), 0));
+        return Encoding.UTF8.GetString(ReadN(n));
+    }
+    byte[] ReadN(int n)
+    {
+        var b = new byte[n]; int o = 0;
+        while (o < n) { int r = _s.Read(b, o, n - o); if (r <= 0) throw new Exception("closed"); o += r; }
+        return b;
     }
 }

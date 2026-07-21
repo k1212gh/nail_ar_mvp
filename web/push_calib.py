@@ -35,6 +35,8 @@ BASE = {
     "camW": -1, "camH": -1, "stretchX": -1.0, "stretchY": -1.0,
     # 전송 계층(USB↔폰 전환): ""=그대로. USB=https://127.0.0.1:8443/infer, LAN=https://<ip>:8443/infer
     "edgeUrl": "",
+    # raw TCP 소켓 전송(B', 빠름) + fps 캡. useSocket=1 소켓, sockHost/sockPort, inferInterval(초)
+    "useSocket": -1, "sockHost": "", "sockPort": -1, "inferInterval": -1.0,
     # 실물크기 프리뷰 + 렌더 게이팅
     "lifesize": -1, "panelRadPerPx": -1.0, "lifesizeMax": -1.0, "gate": -1,
 }

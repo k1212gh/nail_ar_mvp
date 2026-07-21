@@ -65,6 +65,8 @@ public class NailARController : MonoBehaviour
         return m_Handler != null;
     }
     private readonly EdgeClient m_Edge = new EdgeClient();
+    private readonly EdgeSocketClient m_Sock = new EdgeSocketClient();   // raw TCP fast path (B')
+    private bool m_UseSocket;
     private bool m_Running;
     private Texture2D m_Grab;
 
@@ -154,6 +156,11 @@ public class NailARController : MonoBehaviour
         public float pBx = -99999f, pBy = -99999f;  // parallax coeff B; sentinel=leave
         // --- TRANSPORT: swap the edge endpoint without rebuilding (USB now, phone/LAN later) ---
         public string edgeUrl = "";            // ""=leave. USB: https://127.0.0.1:8443/infer, LAN: https://<ip>:8443/infer
+        // --- raw TCP socket transport (B'): kills per-frame TLS handshake -> higher fps ---
+        public int useSocket = -1;             // 1=socket(fast), 0=HTTP, -1=leave
+        public string sockHost = "";           // ""=leave; USB=127.0.0.1, LAN=<pc-ip>
+        public int sockPort = -1;              // -1=leave (default 8444)
+        public float inferInterval = -1f;      // <0=leave; loop wait sec (fps cap). 0=as fast as possible
         // --- LIFE-SIZE preview (reference-card scale) ---
         public int lifesize = -1;              // 1=match the real hand's apparent size, 0=off, -1=leave
         public float panelRadPerPx = -1f;      // radians subtended by ONE canvas px (the single unknown
@@ -258,6 +265,16 @@ public class NailARController : MonoBehaviour
             {
                 m_Edge.url = c.edgeUrl;
                 Debug.Log($"[NailAR] edge endpoint -> {c.edgeUrl}");
+            }
+            // raw TCP socket transport (fast path) — live-swappable
+            if (c.inferInterval >= 0f) inferIntervalSec = c.inferInterval;
+            if (!string.IsNullOrEmpty(c.sockHost)) m_Sock.host = c.sockHost;
+            if (c.sockPort > 0) m_Sock.port = c.sockPort;
+            if (c.useSocket != -1 && (c.useSocket == 1) != m_UseSocket)
+            {
+                m_UseSocket = c.useSocket == 1;
+                if (m_UseSocket) m_Sock.Start();
+                Debug.Log($"[NailAR] transport -> {(m_UseSocket ? "SOCKET" : "HTTP")}");
             }
             // --- life-size preview + render gating (log only on CHANGE, not every 0.7s poll) ---
             if (c.lifesize != -1 && (c.lifesize == 1) != m_LifesizeOn)
@@ -599,43 +616,59 @@ public class NailARController : MonoBehaviour
 
     private IEnumerator InferLoop()
     {
-        var wait = new WaitForSeconds(inferIntervalSec);
         while (m_Running)
         {
-            yield return wait;
+            if (inferIntervalSec > 0f) yield return new WaitForSeconds(inferIntervalSec);  // live-tunable fps cap
+            else yield return null;
             byte[] jpeg = GrabJpeg();
             if (jpeg == null) continue;
-            yield return m_Edge.Infer(jpeg, res =>
+            if (m_UseSocket)
             {
-                if (res == null || !res.ok || overlay == null) return;
-                UpdateLifesize(res);                        // card scale -> life-size preview zoom
-                var shown = GateNails(res.nails);           // render gating (hide moving nails)
-                overlay.SetResults(shown, res.w, res.h);
-                if (grid != null) grid.SetResults(shown, res.w, res.h);
-                if (meshR != null) meshR.SetResults(shown, res.w, res.h);
-                // enrollment progress -> HUD (server-composed line, e.g. "[Right] T12 I40 ... /40")
-                if (m_Mode == (int)NailMode.Enroll && res.enroll != null && res.enroll.active
-                    && !string.IsNullOrEmpty(res.enroll.msg))
-                    ShowHud(res.enroll.done ? res.enroll.msg + "  → PC: bake 후 push" : res.enroll.msg);
-                if (m_DynDepth && res.nails != null && res.nails.Count > 0)
-                {
-                    // prefer the server's absolute distance (World Landmarks); fall back to nail size
-                    float distSum = 0f; int distN = 0, i = 0;
-                    float lenSum = 0f;
-                    foreach (var n in res.nails) { if (n.distM > 0.01f) { distSum += n.distM; distN++; } lenSum += n.len; i++; }
-                    if (distN > 0)
-                    {
-                        m_TargetDepth = Mathf.Clamp((distSum / distN) * m_DistScale, m_DepthMin, m_DepthMax);
-                        if ((m_LogTick++ % 15) == 0)
-                            Debug.Log($"[NailAR] distM={(distSum/distN):F3} x{m_DistScale} -> depth={m_TargetDepth:F3}m");
-                    }
-                    else if (i > 0)
-                    {
-                        float avg = lenSum / i;
-                        if (avg > 0.5f) m_TargetDepth = Mathf.Clamp(m_DepthK / avg, m_DepthMin, m_DepthMax);
-                    }
-                }
-            });
+                // raw TCP fast path: submit on the worker thread, poll for the response (frames-in-flight=1)
+                m_Sock.wantCard = m_LifesizeOn;
+                m_Sock.Submit(jpeg);
+                float t0 = Time.realtimeSinceStartup;
+                while (!m_Sock.Done && Time.realtimeSinceStartup - t0 < 2f) yield return null;
+                InferResult res = null;
+                if (m_Sock.Done && !m_Sock.Err)
+                    try { res = JsonUtility.FromJson<InferResult>(m_Sock.Resp); }
+                    catch (Exception e) { Debug.LogWarning("[NailAR] sock parse: " + e.Message); }
+                HandleResult(res);
+            }
+            else
+            {
+                yield return m_Edge.Infer(jpeg, HandleResult);   // HTTP path
+            }
+        }
+    }
+
+    // Apply one inference result (shared by socket + HTTP paths).
+    private void HandleResult(InferResult res)
+    {
+        if (res == null || !res.ok || overlay == null) return;
+        UpdateLifesize(res);                        // card scale -> life-size preview zoom
+        var shown = GateNails(res.nails);           // render gating (hide moving nails)
+        overlay.SetResults(shown, res.w, res.h);
+        if (grid != null) grid.SetResults(shown, res.w, res.h);
+        if (meshR != null) meshR.SetResults(shown, res.w, res.h);
+        if (m_Mode == (int)NailMode.Enroll && res.enroll != null && res.enroll.active
+            && !string.IsNullOrEmpty(res.enroll.msg))
+            ShowHud(res.enroll.done ? res.enroll.msg + "  -> PC: bake 후 push" : res.enroll.msg);
+        if (m_DynDepth && res.nails != null && res.nails.Count > 0)
+        {
+            float distSum = 0f; int distN = 0, i = 0; float lenSum = 0f;
+            foreach (var n in res.nails) { if (n.distM > 0.01f) { distSum += n.distM; distN++; } lenSum += n.len; i++; }
+            if (distN > 0)
+            {
+                m_TargetDepth = Mathf.Clamp((distSum / distN) * m_DistScale, m_DepthMin, m_DepthMax);
+                if ((m_LogTick++ % 15) == 0)
+                    Debug.Log($"[NailAR] distM={(distSum / distN):F3} x{m_DistScale} -> depth={m_TargetDepth:F3}m");
+            }
+            else if (i > 0)
+            {
+                float avg = lenSum / i;
+                if (avg > 0.5f) m_TargetDepth = Mathf.Clamp(m_DepthK / avg, m_DepthMin, m_DepthMax);
+            }
         }
     }
 
@@ -688,6 +721,7 @@ public class NailARController : MonoBehaviour
     void OnDestroy()
     {
         m_Running = false;
+        m_Sock.Stop();
         if (m_Handler != null) { ShareCamera.CloseCamera(m_Handler); m_Handler = null; }
     }
 }

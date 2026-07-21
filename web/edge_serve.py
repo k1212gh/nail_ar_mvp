@@ -14,7 +14,10 @@ import functools
 import http.server
 import json
 import os
+import socket
+import socketserver
 import ssl
+import struct
 import sys
 import threading
 import time
@@ -377,6 +380,63 @@ def _start_monitor():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
 
+# ---------------------------------------------------------------------------
+# raw TCP 소켓 추론 (B') — 영구 연결로 프레임당 TLS 핸드셰이크를 제거해 지연↓/fps↑.
+# 프로토콜(요청):  [4B total-len(BE)] [1B flags] [JPEG]    flags bit0 = want_card
+# 프로토콜(응답):  [4B len(BE)] [JSON]
+# 평문(LAN/USB 전용). HTTP /infer(8443)는 그대로 유지 — 소켓은 빠른 프리뷰 경로.
+# ---------------------------------------------------------------------------
+INFER_SOCK_PORT = int(os.environ.get("NAIL_SOCK_PORT", "8444"))
+_INFER_LOCK = threading.Lock()   # MediaPipe/칼만은 스레드-비안전 → 추론 직렬화
+
+
+def _recv_n(sock, n: int):
+    buf = b""
+    while len(buf) < n:
+        c = sock.recv(n - len(buf))
+        if not c:
+            return None
+        buf += c
+    return buf
+
+
+class _InferTCPHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        try:
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        while True:
+            hdr = _recv_n(self.request, 4)
+            if hdr is None:
+                break
+            total = struct.unpack(">I", hdr)[0]
+            if total < 1 or total > 20_000_000:
+                break
+            payload = _recv_n(self.request, total)
+            if payload is None:
+                break
+            flags, body = payload[0], payload[1:]
+            with _INFER_LOCK:
+                res = _infer_jpeg(body, want_card=bool(flags & 1))
+            _update_monitor(body, res)
+            out = json.dumps(res).encode("utf-8")
+            try:
+                self.request.sendall(struct.pack(">I", len(out)) + out)
+            except Exception:
+                break
+
+
+class _ThreadingTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def _start_infer_socket():
+    srv = _ThreadingTCPServer(("0.0.0.0", INFER_SOCK_PORT), _InferTCPHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         path, _, query = self.path.partition("?")
@@ -429,14 +489,16 @@ def main():
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(S.CERT, S.KEY)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-    _start_monitor()   # WiFi 무선 모니터(HTTP)
+    _start_monitor()        # WiFi 무선 모니터(HTTP)
+    _start_infer_socket()   # raw TCP 소켓 추론(B') — 빠른 프리뷰 경로
     print("=" * 60)
     print("  에지 추론 서버 (PC가 인식, 폰은 렌더)")
     print(f"  폰 접속:  https://{ip}:{PORT}/edge.html")
     print(f"  ★ 무선 모니터(같은 WiFi 브라우저):  http://{ip}:{MON_PORT}/monitor")
+    print(f"  소켓 추론(빠름):  {ip}:{INFER_SOCK_PORT}  (USB: adb reverse tcp:{INFER_SOCK_PORT})")
     print("  방화벽 팝업 뜨면 '액세스 허용'. 종료: Ctrl+C")
     print("=" * 60)
-    log.info("무선 모니터: http://%s:%d/monitor", ip, MON_PORT)
+    log.info("무선 모니터: http://%s:%d/monitor  |  소켓: %s:%d", ip, MON_PORT, ip, INFER_SOCK_PORT)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
