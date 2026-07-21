@@ -96,6 +96,15 @@ public class NailARController : MonoBehaviour
     private float m_TapDebounce, m_HudUntil;
     private UnityEngine.UI.Text m_Hud;
 
+    // --- ON-GLASSES alongTip tuner (mirror mode) ----------------------------------------------
+    // The detected nail centre is DIP+0.6*(TIP-DIP), i.e. slightly proximal of the nail plate, so the
+    // design reads as "a bit below the nail". alongTip shifts it along the nail's own axis; the right
+    // value has to be found by eye. Swiping the temple touchpad steps this ladder so it can be dialled
+    // in wearing the glasses alone (no PC / push_calib), and the value survives an app restart.
+    private static readonly float[] k_AlongSteps = { -0.05f, 0f, 0.05f, 0.10f, 0.15f, 0.20f, 0.25f, 0.30f };
+    private const string k_AlongPref = "nailar.alongTip";
+    private Vector2 m_SwipeStart; private bool m_Swiping; private float m_SwipeT;
+
     void Start()
     {
         m_Edge.url = edgeUrl;
@@ -555,6 +564,8 @@ public class NailARController : MonoBehaviour
                     meshR.parallaxEnable = false;
                     meshR.calibOffset = Vector2.zero;
                     meshR.calibScale = 1f;                // no SPAAM spread in mirror
+                    // restore the last on-glasses tuned axis shift (swipe the temple pad to change)
+                    meshR.alongTip = PlayerPrefs.GetFloat(k_AlongPref, meshR.alongTip);
                     meshR.ReloadBake();
                 }
                 break;
@@ -758,7 +769,8 @@ public class NailARController : MonoBehaviour
         }
 #if !CALIB_APP && !MESH_APP && !MIRROR_APP
         // cycle modes with a screen/touchpad tap (debounced) — disabled in the single-mode apps
-        if (Time.time - m_TapDebounce > 0.4f &&
+        // (skipped in MirrorMesh: there the pad belongs to the alongTip tuner below)
+        if (Time.time - m_TapDebounce > 0.4f && m_Mode != (int)NailMode.MirrorMesh &&
             (Input.GetMouseButtonDown(0) || (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)))
         {
             m_TapDebounce = Time.time;
@@ -766,7 +778,54 @@ public class NailARController : MonoBehaviour
             ApplyMode(k_TapCycle[(ci + 1) % k_TapCycle.Length]);   // ARGrid -> ARDesign -> ARMesh
         }
 #endif
+        // mirror: temple-touchpad swipe tunes the design's shift along the nail axis
+        if (m_Mode == (int)NailMode.MirrorMesh) StepAlongTipByInput();
         if (m_Hud != null && m_Hud.enabled && Time.time > m_HudUntil) m_Hud.enabled = false;
+    }
+
+    // Temple touchpad -> alongTip ladder. The pad may surface in Unity either as touch/mouse drags or
+    // as DPAD keys (the launcher converts swipes on some builds), so BOTH are handled and the HUD tags
+    // which one fired — that also tells us on-device which path the X3 actually uses.
+    private void StepAlongTipByInput()
+    {
+        int step = 0; string src = null;
+        if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.UpArrow)) { step = +1; src = "key"; }
+        else if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.DownArrow)) { step = -1; src = "key"; }
+        if (step == 0)
+        {
+            Vector2 p; bool down, up;
+            if (Input.touchCount > 0)
+            {
+                var t = Input.GetTouch(0); p = t.position;
+                down = t.phase == TouchPhase.Began;
+                up = t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled;
+            }
+            else { p = Input.mousePosition; down = Input.GetMouseButtonDown(0); up = Input.GetMouseButtonUp(0); }
+            if (down) { m_SwipeStart = p; m_Swiping = true; m_SwipeT = Time.time; }
+            else if (up && m_Swiping)
+            {
+                m_Swiping = false;
+                float dx = p.x - m_SwipeStart.x, dy = p.y - m_SwipeStart.y;
+                float d = Mathf.Abs(dx) >= Mathf.Abs(dy) ? dx : dy;   // whichever axis the pad maps to
+                if (Mathf.Abs(d) > Mathf.Max(40f, Screen.width * 0.06f) && Time.time - m_SwipeT < 1.5f)
+                { step = d > 0 ? +1 : -1; src = "swipe"; }
+            }
+        }
+        if (step == 0 || Time.time - m_TapDebounce < 0.25f) return;
+        m_TapDebounce = Time.time;
+
+        float cur = meshR != null ? meshR.alongTip : PlayerPrefs.GetFloat(k_AlongPref, 0f);
+        int i = 0; float best = float.MaxValue;                       // nearest rung to the live value,
+        for (int k = 0; k < k_AlongSteps.Length; k++)                 // so a push_calib value still steps
+        {
+            float dd = Mathf.Abs(k_AlongSteps[k] - cur);
+            if (dd < best) { best = dd; i = k; }
+        }
+        float v = k_AlongSteps[Mathf.Clamp(i + step, 0, k_AlongSteps.Length - 1)];
+        if (meshR != null) meshR.alongTip = v;
+        PlayerPrefs.SetFloat(k_AlongPref, v); PlayerPrefs.Save();
+        ShowHud($"alongTip {v:0.00}   [{src}]");
+        Debug.Log($"[NailAR] alongTip -> {v:0.000} via {src}");
     }
 
     private IEnumerator InferLoop()
