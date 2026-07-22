@@ -105,6 +105,17 @@ public class NailARController : MonoBehaviour
     private const string k_AlongPref = "nailar.alongTip";
     private Vector2 m_SwipeStart; private bool m_Swiping; private float m_SwipeT;
 
+    // --- ON-GLASSES live tuner (mirror/guide) -------------------------------------------------
+    // One temple touchpad drives everything: TAP cycles the active parameter, SWIPE (or DPAD keys)
+    // nudges it. All values persist (PlayerPrefs) and apply live, so the rig is dialled in wearing
+    // the glasses alone — no PC/push_calib. If the X3 turns out to expose L/R pads distinctly, the
+    // HUD [tap]/[swipe]/[key] tag reveals it and we can bind left=zoom / right=offset directly.
+    private enum Tune { OffX, OffY, Zoom, Along }
+    private static readonly Tune[] k_TuneOrder = { Tune.OffX, Tune.OffY, Tune.Zoom, Tune.Along };
+    private int m_TuneIdx = 0;
+    private Vector2 m_TuneOff = Vector2.zero;   // live design offset (정합), display px
+    private const string k_OffXPref = "nailar.offX", k_OffYPref = "nailar.offY", k_ZoomPref = "nailar.guideTarget";
+
     void Start()
     {
         m_Edge.url = edgeUrl;
@@ -564,8 +575,13 @@ public class NailARController : MonoBehaviour
                     meshR.parallaxEnable = false;
                     meshR.calibOffset = Vector2.zero;
                     meshR.calibScale = 1f;                // no SPAAM spread in mirror
-                    // restore the last on-glasses tuned axis shift (swipe the temple pad to change)
+                    // restore the last on-glasses tuned values (tap-cycle + swipe): axis shift, design
+                    // offset (정합), and guide zoom weight — all survive an app restart.
                     meshR.alongTip = PlayerPrefs.GetFloat(k_AlongPref, meshR.alongTip);
+                    m_TuneOff = new Vector2(PlayerPrefs.GetFloat(k_OffXPref, 0f), PlayerPrefs.GetFloat(k_OffYPref, 0f));
+                    meshR.calibOffset = m_TuneOff;
+                    if (overlay != null) overlay.calibOffset = m_TuneOff;
+                    m_GuideTarget = PlayerPrefs.GetFloat(k_ZoomPref, m_GuideTarget);
                     meshR.ReloadBake();
                 }
                 break;
@@ -778,20 +794,26 @@ public class NailARController : MonoBehaviour
             ApplyMode(k_TapCycle[(ci + 1) % k_TapCycle.Length]);   // ARGrid -> ARDesign -> ARMesh
         }
 #endif
-        // mirror: temple-touchpad swipe tunes the design's shift along the nail axis
-        if (m_Mode == (int)NailMode.MirrorMesh) StepAlongTipByInput();
+        // mirror/guide: temple-touchpad drives the live tuner (tap = next target, swipe = adjust)
+        if (m_Mode == (int)NailMode.MirrorMesh) TouchpadTune();
         if (m_Hud != null && m_Hud.enabled && Time.time > m_HudUntil) m_Hud.enabled = false;
     }
 
-    // Temple touchpad -> alongTip ladder. The pad may surface in Unity either as touch/mouse drags or
-    // as DPAD keys (the launcher converts swipes on some builds), so BOTH are handled and the HUD tags
-    // which one fired — that also tells us on-device which path the X3 actually uses.
-    private void StepAlongTipByInput()
+    // Temple touchpad / DPAD -> live tuner. TAP = next target, SWIPE (or arrow keys) = adjust it.
+    // The pad may surface as touch/mouse drags OR as DPAD/click keys (launcher-dependent), so BOTH
+    // are handled and the HUD tags which fired — that also tells us on-device which path the X3 uses.
+    private void TouchpadTune()
     {
-        int step = 0; string src = null;
+        int step = 0; bool tap = false; string src = null;
+
+        // (a) DPAD arrows -> adjust current target; click-style keys -> tap (cycle target)
         if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.UpArrow)) { step = +1; src = "key"; }
         else if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.DownArrow)) { step = -1; src = "key"; }
-        if (step == 0)
+        else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)
+                 || Input.GetKeyDown(KeyCode.JoystickButton0) || Input.GetKeyDown(KeyCode.Space)) { tap = true; src = "click"; }
+
+        // (b) touch/mouse -> distinguish a TAP (small move) from a SWIPE (big move)
+        if (step == 0 && !tap)
         {
             Vector2 p; bool down, up;
             if (Input.touchCount > 0)
@@ -806,26 +828,84 @@ public class NailARController : MonoBehaviour
             {
                 m_Swiping = false;
                 float dx = p.x - m_SwipeStart.x, dy = p.y - m_SwipeStart.y;
-                float d = Mathf.Abs(dx) >= Mathf.Abs(dy) ? dx : dy;   // whichever axis the pad maps to
-                if (Mathf.Abs(d) > Mathf.Max(40f, Screen.width * 0.06f) && Time.time - m_SwipeT < 1.5f)
-                { step = d > 0 ? +1 : -1; src = "swipe"; }
+                float mv = Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dy));
+                float swipeMin = Mathf.Max(40f, Screen.width * 0.06f);
+                if (Time.time - m_SwipeT < 1.5f)
+                {
+                    if (mv > swipeMin) { float d = Mathf.Abs(dx) >= Mathf.Abs(dy) ? dx : dy; step = d > 0 ? +1 : -1; src = "swipe"; }
+                    else if (mv < swipeMin * 0.5f && Time.time - m_SwipeT < 0.4f) { tap = true; src = "tap"; }
+                }
             }
         }
-        if (step == 0 || Time.time - m_TapDebounce < 0.25f) return;
+
+        if (Time.time - m_TapDebounce < 0.25f) return;
+
+        if (tap)                                    // cycle which parameter the swipe controls
+        {
+            m_TapDebounce = Time.time;
+            m_TuneIdx = (m_TuneIdx + 1) % k_TuneOrder.Length;
+            ShowHud($"▶ {TuneLabel(k_TuneOrder[m_TuneIdx])}   [{src}]");
+            return;
+        }
+        if (step == 0) return;
         m_TapDebounce = Time.time;
 
+        switch (k_TuneOrder[m_TuneIdx])             // adjust the active parameter
+        {
+            case Tune.OffX:
+                m_TuneOff.x = Mathf.Clamp(m_TuneOff.x + step * 6f, -400f, 400f);
+                ApplyTuneOffset(); PlayerPrefs.SetFloat(k_OffXPref, m_TuneOff.x);
+                ShowHud($"정합 좌우 X={m_TuneOff.x:0}   [{src}]");
+                break;
+            case Tune.OffY:
+                m_TuneOff.y = Mathf.Clamp(m_TuneOff.y + step * 6f, -400f, 400f);
+                ApplyTuneOffset(); PlayerPrefs.SetFloat(k_OffYPref, m_TuneOff.y);
+                ShowHud($"정합 상하 Y={m_TuneOff.y:0}   [{src}]");
+                break;
+            case Tune.Zoom:
+                m_GuideTarget = Mathf.Clamp(m_GuideTarget + step * 0.05f, 0.2f, 1.2f);
+                PlayerPrefs.SetFloat(k_ZoomPref, m_GuideTarget);
+                ShowHud($"줌 가중치 {m_GuideTarget:0.00}   [{src}]");
+                break;
+            default:
+                StepAlong(step, src);
+                break;
+        }
+        PlayerPrefs.Save();
+        Debug.Log($"[NailAR] tune {k_TuneOrder[m_TuneIdx]} {(step > 0 ? "+" : "-")} via {src}");
+    }
+
+    private static string TuneLabel(Tune t)
+    {
+        switch (t)
+        {
+            case Tune.OffX: return "정합 좌우(X)";
+            case Tune.OffY: return "정합 상하(Y)";
+            case Tune.Zoom: return "줌 가중치";
+            default:        return "alongTip";
+        }
+    }
+
+    private void ApplyTuneOffset()
+    {
+        if (overlay != null) overlay.calibOffset = m_TuneOff;
+        if (meshR != null) meshR.calibOffset = m_TuneOff;
+    }
+
+    // alongTip ladder step (nearest rung to the live value so a push_calib value still steps cleanly)
+    private void StepAlong(int step, string src)
+    {
         float cur = meshR != null ? meshR.alongTip : PlayerPrefs.GetFloat(k_AlongPref, 0f);
-        int i = 0; float best = float.MaxValue;                       // nearest rung to the live value,
-        for (int k = 0; k < k_AlongSteps.Length; k++)                 // so a push_calib value still steps
+        int i = 0; float best = float.MaxValue;
+        for (int k = 0; k < k_AlongSteps.Length; k++)
         {
             float dd = Mathf.Abs(k_AlongSteps[k] - cur);
             if (dd < best) { best = dd; i = k; }
         }
         float v = k_AlongSteps[Mathf.Clamp(i + step, 0, k_AlongSteps.Length - 1)];
         if (meshR != null) meshR.alongTip = v;
-        PlayerPrefs.SetFloat(k_AlongPref, v); PlayerPrefs.Save();
+        PlayerPrefs.SetFloat(k_AlongPref, v);
         ShowHud($"alongTip {v:0.00}   [{src}]");
-        Debug.Log($"[NailAR] alongTip -> {v:0.000} via {src}");
     }
 
     private IEnumerator InferLoop()
