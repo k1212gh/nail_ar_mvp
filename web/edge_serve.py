@@ -302,6 +302,44 @@ def _mon_fps() -> float:
     return (len(t) - 1) / (t[-1] - t[0]) if len(t) >= 2 and t[-1] > t[0] else 0.0
 
 
+# --- PEN OCCLUSION PROBE (A-stage) --------------------------------------------------------------
+# The design is composited OVER the nail; a pen laid on the nail should occlude it, but currently
+# the design draws on top → 손톱→펜→디자인. We don't yet know the pen's look, so overlay SEVERAL
+# occluder cues (dark / low-sat / strong-edge) INSIDE the nail region, each in a distinct colour,
+# on the monitor — so we can eyeball which cue tracks the real pen before committing to a method.
+# Toggle: env PEN_PROBE=0 to disable. This is diagnostics only; no rendering path is changed yet.
+PEN_PROBE = os.environ.get("PEN_PROBE", "1") == "1"
+
+
+def _pen_probe_overlay(im, nl):
+    """Colour-code candidate pen/occluder pixels inside (a dilation of) the nail region."""
+    h, w = im.shape[:2]
+    region = np.zeros((h, w), np.uint8)
+    for nd in nl:
+        cont = nd.get("contour")
+        if cont:
+            cv2.fillPoly(region, [np.array(cont, np.int32).reshape(-1, 1, 2)], 255)
+    if not region.any():
+        return im
+    region = cv2.dilate(region, np.ones((25, 25), np.uint8)) > 0   # pen extends past the nail edge
+    gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    sat = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)[:, :, 1]
+
+    dark = (gray < 90) & region                     # cue1: dark/metallic pen body
+    lowsat = (sat < 40) & region                    # cue2: grey plastic/metal (skin is saturated)
+    edges = cv2.dilate(cv2.Canny(gray, 60, 160), np.ones((3, 3), np.uint8)) > 0
+    edges = edges & region                          # cue3: pen shaft = long high-contrast edge
+
+    over = im.copy()
+    over[dark] = (255, 80, 0)                        # blue
+    over[lowsat] = (0, 180, 255)                     # orange
+    im = cv2.addWeighted(over, 0.45, im, 0.55, 0)
+    im[edges] = (0, 0, 255)                          # red lines on top
+    cv2.putText(im, "PEN PROBE  blue=dark  orange=low-sat  red=edges",
+                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    return im
+
+
 def _update_monitor(body: bytes, res: dict) -> None:
     """프레임에 손톱 외곽/중심을 그려 모니터용 JPEG로 보관 + 통계 갱신(매 프레임)."""
     try:
@@ -314,6 +352,8 @@ def _update_monitor(body: bytes, res: dict) -> None:
             if cont:
                 cv2.polylines(im, [np.array(cont, np.int32).reshape(-1, 1, 2)], True, (0, 255, 0), 2)
             cv2.circle(im, (int(nd.get("cx", 0)), int(nd.get("cy", 0))), 4, (0, 0, 255), -1)
+        if PEN_PROBE and nl:
+            im = _pen_probe_overlay(im, nl)      # A-stage: visualise pen/occluder cues
         if MON_ROT == "cw":
             im = cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)       # 90° 장착 카메라를 세워서 보기(뷰 전용)
         elif MON_ROT == "ccw":
