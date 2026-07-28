@@ -309,6 +309,8 @@ def _mon_fps() -> float:
 # on the monitor — so we can eyeball which cue tracks the real pen before committing to a method.
 # Toggle: env PEN_PROBE=0 to disable. This is diagnostics only; no rendering path is changed yet.
 PEN_PROBE = os.environ.get("PEN_PROBE", "1") == "1"
+_DUMP_DIR = os.environ.get("DUMP_DIR", "")   # set -> save raw frames here (A단계 오프라인 테스트 수집)
+_DUMP = {"t": 0.0, "n": 0}
 
 
 def _pen_probe_overlay(im, nl):
@@ -346,6 +348,10 @@ def _update_monitor(body: bytes, res: dict) -> None:
         im = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
         if im is None:
             return
+        if _DUMP_DIR and time.time() - _DUMP["t"] > 0.4:   # A단계: 원본 프레임 수집(오프라인 테스트용)
+            _DUMP["t"] = time.time()
+            cv2.imwrite(os.path.join(_DUMP_DIR, f"raw_{_DUMP['n']:03d}.jpg"), im)
+            _DUMP["n"] += 1
         nl = res.get("nails", [])
         for nd in nl:
             cont = nd.get("contour")
