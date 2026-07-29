@@ -29,9 +29,10 @@ android {
         jvmTarget = "17"
     }
 
-    // .task 모델은 압축하면 mmap 로딩이 안 되므로 비압축
+    // .task/.onnx 모델은 압축하면 mmap/로딩이 안 되므로 비압축
     androidResources {
         noCompress += "task"
+        noCompress += "onnx"
     }
 }
 
@@ -49,4 +50,7 @@ dependencies {
 
     // MediaPipe Tasks Vision (HandLandmarker) — PC hand_landmarks 역할
     implementation("com.google.mediapipe:tasks-vision:0.10.14")
+
+    // onnxruntime-android — 온디바이스 YOLOv8-seg 손톱검출(에지 서버 모드). NNAPI EP 내장.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 }

@@ -30,6 +30,8 @@ android/app/build/
 android/**/build/
 android/captures/
 android/.idea/
+# 45MB — web/nails_seg.onnx 에서 복사(빌드시). 커밋 제외.
+android/app/src/main/assets/nails_seg.onnx
 *.iml
 
 # ===== 대용량 바이너리 / 아카이브 (재생성·재다운로드 가능) =====

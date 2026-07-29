@@ -21,5 +21,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 온디바이스 에지 서버(안경용 YOLO 손톱검출). 별도 런처 아이콘으로 진입. -->
+        <activity
+            android:name=".edge.EdgeServerActivity"
+            android:exported="true"
+            android:label="Nail Edge Server"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
