@@ -31,7 +31,7 @@ data class Nail(
  * torch-free YOLOv8-seg 손톱검출 (onnxruntime-android, NNAPI 가속).
  * web/yolo.js / tools/onnx_edge/onnx_infer.py 의 letterbox→추론→NMS→마스크→PCA 를 그대로 이식.
  */
-class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx") {
+class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx", ep: String = "cpu") {
 
     companion object {
         const val S = 640
@@ -54,12 +54,16 @@ class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx") {
         val bytes = context.assets.open(modelAsset).use { it.readBytes() }
         val opts = OrtSession.SessionOptions()
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-        try {
-            // Snapdragon Hexagon NPU / Adreno GPU 로 라우팅 (fp16 허용)
-            opts.addNnapi(EnumSet.of(NNAPIFlags.USE_FP16))
-            backend = "nnapi"
-        } catch (t: Throwable) {
-            backend = "cpu"
+        // EP 선택(인텐트 --es ep nnapi|xnnpack|cpu). YOLOv8-seg는 NNAPI 미지원 op가 많아
+        // CPU 폴백/분할로 오히려 느릴 수 있어 런타임 비교용으로 노출.
+        when (ep.lowercase()) {
+            "cpu" -> backend = "cpu"
+            "xnnpack" -> try {
+                opts.addXnnpack(mapOf("intra_op_num_threads" to "4")); backend = "xnnpack"
+            } catch (t: Throwable) { backend = "cpu" }
+            else -> try {
+                opts.addNnapi(EnumSet.of(NNAPIFlags.USE_FP16)); backend = "nnapi"
+            } catch (t: Throwable) { backend = "cpu" }
         }
         session = env.createSession(bytes, opts)
         inputName = session.inputNames.iterator().next()

@@ -35,8 +35,10 @@ class EdgeServerActivity : AppCompatActivity() {
         // 모델 로드 + NNAPI 세션 준비는 무거우니 백그라운드
         Thread {
             val t0 = System.currentTimeMillis()
+            // 기본 CPU — S22 Ultra 실측상 CPU(479ms) > XNNPACK(573) > NNAPI(1425). --es ep 로 변경 가능.
+            val ep = intent.getStringExtra("ep") ?: "cpu"   // cpu|xnnpack|nnapi
             val m = try {
-                NailOnnx(this)
+                NailOnnx(this, ep = ep)
             } catch (e: Throwable) {
                 runOnUiThread { status.text = "모델 로드 실패: ${e.message}" }
                 return@Thread
@@ -45,23 +47,30 @@ class EdgeServerActivity : AppCompatActivity() {
             runOnUiThread {
                 status.text = "준비됨 (backend=${m.backend}, ${System.currentTimeMillis() - t0}ms)\n시작을 누르세요"
                 toggle.isEnabled = true
+                // --ez autostart true 이면 탭 없이 자동 시작(스크립트/헤드리스 테스트용)
+                if (intent.getBooleanExtra("autostart", false)) startServer()
             }
         }.start()
 
         toggle.setOnClickListener {
-            val m = onnx ?: return@setOnClickListener
-            if (server == null) {
-                val srv = EdgeServer(m, 8444) { s -> runOnUiThread { status.text = s } }
-                server = srv
-                srv.start()
-                toggle.text = "중지"
-            } else {
-                server?.stop()
-                server = null
-                toggle.text = "시작"
-                status.text = "중지됨"
-            }
+            if (server == null) startServer() else stopServer()
         }
+    }
+
+    private fun startServer() {
+        val m = onnx ?: return
+        if (server != null) return
+        val srv = EdgeServer(m, 8444) { s -> runOnUiThread { status.text = s } }
+        server = srv
+        srv.start()
+        toggle.text = "중지"
+    }
+
+    private fun stopServer() {
+        server?.stop()
+        server = null
+        toggle.text = "시작"
+        status.text = "중지됨"
     }
 
     override fun onDestroy() {

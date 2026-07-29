@@ -82,14 +82,26 @@ JSON:  {"ok":true,"w":W,"h":H,"ms":M,
 - `BUILD SUCCESSFUL` → **`app-debug.apk` 174MB** 산출. **Kotlin 구현이 컴파일·통합 검증됨.**
 - **onnxruntime-android 정상 통합**: `libonnxruntime.so` / `libonnxruntime4j_jni.so` 가 APK에 패키징됨(NNAPI EP 포함).
 - 첫 빌드에서 `EdgeServerActivity`의 `R` import 누락 1건만 있었고 수정 후 통과.
-- 폰 실기기 **설치·실행·NNAPI fps 실측**은 폰 재연결 후 `adb install -r` → "Nail Edge Server" 실행. (본 세션 중 폰 USB가 반복적으로 끊겨 온디바이스 실행 계측은 미완 — 코드/빌드/파이프라인은 검증 완료.)
+- 폰 실기기 **설치·실행·온디바이스 실측 완료** → §7 참조. `adb install -r` → "Nail Edge Server" 실행, 서버가 8444 리슨, `adb forward` 왕복으로 검출·지연 측정(노트북과 동일 검출).
 
-## 7. 성능 전망
+## 7. 온디바이스 실측 (갤럭시 S22 Ultra / SD8 Gen1, 640², adb forward 왕복)
 
-- 노트북 CPU(onnxruntime) 640² ≈ **3fps**. 이건 하한선.
-- 폰 **NNAPI(NPU/GPU)** → 훨씬 빠름(실시간급 기대, S22 Ultra Hexagon).
-- 급하면 모델을 **320²로 재export** → 약 4배↑. (정확도 소폭 손해)
-- onnxruntime 스레드/그래프 최적화도 여지 있음.
+폰에 실제 설치·실행하고, `adb forward tcp:9444 tcp:8444` 로 폰 서버에 붙어 캡처 프레임을 보내 측정.
+검출 결과는 노트북과 **동일**(raw_205→nails=2, raw_104→4, raw_248→3 …) — 파이프라인 온디바이스 정상.
+
+| EP | 지연 | fps | 비고 |
+|---|---|---|---|
+| **CPU (기본 채택)** | **~479 ms** | **~2.1** | 최고. onnxruntime 기본 CPU |
+| XNNPACK | ~573 ms | ~1.7 | 이 모델엔 이득 없음 |
+| NNAPI | ~1425 ms | ~0.7 | **오히려 느림** — YOLOv8-seg 미지원 op 폴백/분할 오버헤드 |
+
+> 결론: **NNAPI/XNNPACK는 이 모델에 도움 안 됨 → 기본 EP를 CPU로 설정.** (런타임 `--es ep` 로 전환 가능)
+
+**실시간(≥10fps) 도달 경로 (다음 증분):**
+- **320²로 재export** → 약 4배↑ (≈8fps). 가장 큰 즉효, 정확도 소폭 손해. **1순위 추천.**
+- **INT8 양자화** → 추가 2~4배 + NNAPI/QNN 지원 op↑.
+- **QNN EP**(Hexagon 직결, NNAPI 우회) → onnxruntime-qnn + 모델 준비 필요하나 NPU 실가속 가능.
+- 현 2fps도 손 정지 시(게이팅/예측) 정밀 가이드 용도엔 사용 가능 수준.
 
 ## 8. 빌드 / 실행
 
