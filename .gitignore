@@ -34,6 +34,9 @@ android/.idea/
 android/app/src/main/assets/*.onnx
 web/nails_seg_320.onnx
 web/nails_seg_416.onnx
+web/nails_seg_int8.onnx
+web/nails_seg_dyn8.onnx
+web/_*.onnx
 *.iml
 
 # ===== 대용량 바이너리 / 아카이브 (재생성·재다운로드 가능) =====

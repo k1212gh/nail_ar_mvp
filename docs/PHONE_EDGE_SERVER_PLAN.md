@@ -115,7 +115,21 @@ JSON:  {"ok":true,"w":W,"h":H,"ms":M,
 - **앱 전환은 재빌드 불필요**(assets에 320 동봉): `--es model nails_seg_320.onnx --ef conf 0.08`
 - 재export: `python tools/onnx_edge/export_320.py` (imgsz만 바꿔 320/416/512 생성).
 
-**추가 증분:** INT8 양자화(640 정확도 유지 + 2~4배) · QNN EP(Hexagon 직결, NNAPI 우회) · 손정지 게이팅.
+### INT8 양자화 시도 결과 — 현재 비적합(기록)
+
+`tools/onnx_edge/quantize_int8.py` 로 640 모델을 캡처 프레임 80장 캘리브레이션해 시도:
+
+| 방식 | 검출 | 노트북 CPU 속도 |
+|---|---|---|
+| 정적(static, QDQ per-channel) | **0%** (검출헤드 양자화로 출력 붕괴) | 476ms |
+| 동적(dynamic, weight-only) | 35%(부분) | **10348ms (0.1fps!)** — conv엔 안티패턴 |
+
+- **onnxruntime CPU에선 INT8이 답이 아님**: 정적=정확도 붕괴, 동적=치명적 저속.
+- 제대로 하려면 (1) **검출헤드 노드 제외(혼합정밀)** 로 정확도 복구 + (2) **NNAPI/QNN** 등 int8 가속
+  백엔드 — 별도 과제. 우선순위 낮음(320@0.08로 이미 실시간 달성).
+
+**추가 증분(우선순위순):** ① 320@0.08 채택(완료) · ② 손정지 게이팅/예측으로 체감 개선 ·
+③ (여력 시) INT8 혼합정밀 + QNN EP.
 
 ## 9. 빌드 / 실행
 
