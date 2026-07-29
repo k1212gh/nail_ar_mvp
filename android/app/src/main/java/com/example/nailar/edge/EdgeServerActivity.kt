@@ -37,8 +37,11 @@ class EdgeServerActivity : AppCompatActivity() {
             val t0 = System.currentTimeMillis()
             // 기본 CPU — S22 Ultra 실측상 CPU(479ms) > XNNPACK(573) > NNAPI(1425). --es ep 로 변경 가능.
             val ep = intent.getStringExtra("ep") ?: "cpu"   // cpu|xnnpack|nnapi
+            // 모델/conf 선택: 실시간엔 --es model nails_seg_320.onnx --ef conf 0.08 (≈4배↑).
+            val model = intent.getStringExtra("model") ?: "nails_seg.onnx"
+            val conf = intent.getFloatExtra("conf", 0.20f)
             val m = try {
-                NailOnnx(this, ep = ep)
+                NailOnnx(this, modelAsset = model, ep = ep, conf = conf)
             } catch (e: Throwable) {
                 runOnUiThread { status.text = "모델 로드 실패: ${e.message}" }
                 return@Thread

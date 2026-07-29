@@ -31,15 +31,14 @@ data class Nail(
  * torch-free YOLOv8-seg 손톱검출 (onnxruntime-android, NNAPI 가속).
  * web/yolo.js / tools/onnx_edge/onnx_infer.py 의 letterbox→추론→NMS→마스크→PCA 를 그대로 이식.
  */
-class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx", ep: String = "cpu") {
+class NailOnnx(
+    context: Context,
+    modelAsset: String = "nails_seg.onnx",
+    ep: String = "cpu",
+    conf: Float = 0.20f,
+) {
 
     companion object {
-        const val S = 640
-        const val NA = 8400
-        const val PW = 160
-        const val PH = 160
-        const val PN = PW * PH
-        const val CONF = 0.20f
         const val IOU = 0.5f
         const val MASK_THR = 0.5f
         const val MAXDET = 12
@@ -48,6 +47,13 @@ class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx", ep: Stri
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
     private val inputName: String
+    private val conf: Float = conf
+    // 입력/출력 크기에서 자동 도출 → 320²/416²/640² 어떤 export 든 대응
+    private val S: Int
+    private val NA: Int
+    private val PW: Int
+    private val PH: Int
+    private val PN: Int
     var backend: String = "cpu"; private set
 
     init {
@@ -55,7 +61,7 @@ class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx", ep: Stri
         val opts = OrtSession.SessionOptions()
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         // EP 선택(인텐트 --es ep nnapi|xnnpack|cpu). YOLOv8-seg는 NNAPI 미지원 op가 많아
-        // CPU 폴백/분할로 오히려 느릴 수 있어 런타임 비교용으로 노출.
+        // CPU 폴백/분할로 오히려 느릴 수 있어 런타임 비교용으로 노출(실측상 cpu 최고).
         when (ep.lowercase()) {
             "cpu" -> backend = "cpu"
             "xnnpack" -> try {
@@ -67,6 +73,15 @@ class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx", ep: Stri
         }
         session = env.createSession(bytes, opts)
         inputName = session.inputNames.iterator().next()
+        val ish = (session.inputInfo[inputName]!!.info as ai.onnxruntime.TensorInfo).shape
+        val oIt = session.outputInfo.values.iterator()
+        val osh = (oIt.next().info as ai.onnxruntime.TensorInfo).shape   // output0 [1,37,NA]
+        val psh = (oIt.next().info as ai.onnxruntime.TensorInfo).shape   // output1 [1,32,PH,PW]
+        S = ish[ish.size - 1].toInt()
+        NA = osh[osh.size - 1].toInt()
+        PH = psh[psh.size - 2].toInt()
+        PW = psh[psh.size - 1].toInt()
+        PN = PW * PH
     }
 
     private fun sigmoid(x: Float) = 1f / (1f + Math.exp(-x.toDouble()).toFloat())
@@ -168,7 +183,7 @@ class NailOnnx(context: Context, modelAsset: String = "nails_seg.onnx", ep: Stri
         val cands = ArrayList<Cand>()
         for (i in 0 until NA) {
             val sc = a0[4 * NA + i]
-            if (sc < CONF) continue
+            if (sc < conf) continue
             val cx = a0[i]; val cy = a0[NA + i]; val w = a0[2 * NA + i]; val h = a0[3 * NA + i]
             cands.add(Cand(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, sc, i))
         }

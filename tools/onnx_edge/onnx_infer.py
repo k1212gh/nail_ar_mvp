@@ -71,16 +71,27 @@ def _pca(pts):
 
 
 class OnnxNailSeg:
-    def __init__(self, model_path: str, providers=None):
+    def __init__(self, model_path: str, providers=None, conf: float = CONF):
+        self.conf = conf
         so = ort.SessionOptions()
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.sess = ort.InferenceSession(
             model_path, sess_options=so,
             providers=providers or ["CPUExecutionProvider"])
         self.inp = self.sess.get_inputs()[0].name
+        # 입력/출력 크기에서 차원 자동 도출 → 320²/640² 모두 대응
+        ishape = self.sess.get_inputs()[0].shape        # [1,3,S,S]
+        oshape = self.sess.get_outputs()[0].shape        # [1,37,NA]
+        pshape = self.sess.get_outputs()[1].shape        # [1,32,PH,PW]
+        self.S = int(ishape[-1]) if isinstance(ishape[-1], int) else 640
+        self.NA = int(oshape[-1]) if isinstance(oshape[-1], int) else 8400
+        self.PH = int(pshape[-2]) if isinstance(pshape[-2], int) else self.S // 4
+        self.PW = int(pshape[-1]) if isinstance(pshape[-1], int) else self.S // 4
+        self.PN = self.PH * self.PW
 
     def _letterbox(self, img):
         h, w = img.shape[:2]
+        S = self.S
         r = min(S / w, S / h)
         nw, nh = round(w * r), round(h * r)
         px, py = (S - nw) // 2, (S - nh) // 2
@@ -91,6 +102,7 @@ class OnnxNailSeg:
 
     def infer(self, img_bgr):
         """BGR 이미지 → 손톱 리스트(원본 좌표계). edge_serve 스키마와 동일."""
+        S, PH, PW, PN = self.S, self.PH, self.PW, self.PN
         H, W = img_bgr.shape[:2]
         ten, r, px, py = self._letterbox(img_bgr)
         o0, o1 = self.sess.run(None, {self.inp: ten})
@@ -98,7 +110,7 @@ class OnnxNailSeg:
         protos = o1[0].reshape(32, PN)   # (32, 25600)
 
         sc = o0[4]
-        idx = np.where(sc >= CONF)[0]
+        idx = np.where(sc >= self.conf)[0]
         if idx.size == 0:
             return []
         cx, cy, ww, hh = o0[0, idx], o0[1, idx], o0[2, idx], o0[3, idx]
@@ -155,10 +167,11 @@ if __name__ == "__main__":
     ap.add_argument("--frames", required=True)
     ap.add_argument("--out", default="onnx_test_out")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--conf", type=float, default=CONF)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
-    seg = OnnxNailSeg(a.model, providers=["CPUExecutionProvider"])
+    seg = OnnxNailSeg(a.model, providers=["CPUExecutionProvider"], conf=a.conf)
     files = sorted(glob.glob(os.path.join(a.frames, "*.jpg")))
     if a.limit:
         files = files[:a.limit]
