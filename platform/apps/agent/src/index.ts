@@ -49,6 +49,11 @@ function startStream(cfg: StartCfg = {}) {
     for (const args of [["reverse", "tcp:8443", "tcp:8443"], ["reverse", "tcp:8444", "tcp:8444"], ["reverse", "tcp:8080", "tcp:8080"]]) {
       try { spawn(ADB, args, { stdio: "ignore" }); } catch { /* noop */ }
     }
+    // 폰→PC 전환 대비: 안경 전송을 USB로 되돌림(이전에 폰 소켓으로 잡혀있으면 PC edge에 안 붙음).
+    try {
+      spawn("python", ["web/push_calib.py", `pkg=${GLASSES_PKG}`, "useSocket=0", "edgeUrl=https://127.0.0.1:8443/infer"],
+        { cwd: REPO_DIR, stdio: "ignore" });
+    } catch { /* noop */ }
     edge = spawn("python", ["web/edge_serve.py"], {
       cwd: REPO_DIR, stdio: "ignore",
       env: { ...process.env, NAIL_OCC_DEMO: cfg.penOcclusion === false ? "0" : "1" },
