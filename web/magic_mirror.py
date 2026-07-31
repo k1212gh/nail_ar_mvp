@@ -43,6 +43,50 @@ def _design_layer(shape, nails):
     return dcol, da
 
 
+def _warp_texture_onto_nail(tex, contour, h, w):
+    """디자인 텍스처를 손톱 방향(minAreaRect)에 맞춰 원근 워핑 + 손톱모양 마스크. (dcol조각, mask) 반환."""
+    pts = np.array(contour, np.float32).reshape(-1, 2)
+    rect = cv2.minAreaRect(pts)                       # (center,(w,h),angle) — 손톱 방향 사각
+    box = cv2.boxPoints(rect).astype(np.float32)       # 4모서리(시계/반시계)
+    th, tw = tex.shape[:2]
+    src = np.array([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]], np.float32)
+    M = cv2.getPerspectiveTransform(src, box)
+    warped = cv2.warpPerspective(tex, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    m = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(m, [np.array(contour, np.int32).reshape(-1, 1, 2)], 255)
+    return warped, m > 0
+
+
+def render_textured(frame_bgr, nails, design_tex, occlude=True, pen_dim=0.15, gloss=True):
+    """카탈로그 디자인 이미지(design_tex, BGR)를 각 손톱에 입혀 미리보기. occlude면 펜 지나는 곳 투명."""
+    if not nails:
+        return frame_bgr.copy()
+    h, w = frame_bgr.shape[:2]
+    dcol = np.zeros((h, w, 3), np.float32)
+    da = np.zeros((h, w), np.float32)
+    for nd in nails:
+        cont = nd.get("contour")
+        if not cont:
+            continue
+        warped, mb = _warp_texture_onto_nail(design_tex, cont, h, w)
+        if not mb.any():
+            continue
+        col = warped.astype(np.float32)
+        if gloss:  # 세로 광택(젤 느낌): 위 밝게
+            ys, xs = np.where(mb)
+            y0, y1 = ys.min(), ys.max()
+            t = (ys - y0) / max(1, (y1 - y0))
+            col[ys, xs] *= (0.85 + 0.4 * (1 - t))[:, None]
+        dcol[mb] = np.clip(col[mb], 0, 255)
+        da[mb] = BASE_ALPHA
+    if occlude:
+        contours = [nd.get("contour") for nd in nails if nd.get("contour")]
+        soft = PO.pen_soft_mask(frame_bgr, contours)
+        return PO.apply_occlusion(frame_bgr, dcol, da, soft, pen_dim=pen_dim)
+    a3 = da[..., None]
+    return np.clip(frame_bgr.astype(np.float32) * (1 - a3) + dcol * a3, 0, 255).astype(np.uint8)
+
+
 def render(frame_bgr, nails, occlude=True, pen_dim=0.15):
     """손톱에 디자인 합성. occlude=True면 펜/도구가 지나는 부분의 디자인을 투명하게(펜이 비침)."""
     if not nails:
