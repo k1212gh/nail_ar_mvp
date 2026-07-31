@@ -130,26 +130,76 @@ export function MembersView() {
   );
 }
 
+// 업로드 이미지를 canvas로 축소(최대 maxPx) → JPEG data URL. DB/전송 부담 최소(≈20~60KB).
+function downscaleToDataUrl(file: File, maxPx = 360): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+      const ctx = cv.getContext("2d"); if (!ctx) return reject(new Error("canvas 미지원"));
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(cv.toDataURL("image/jpeg", 0.82));
+    };
+    img.onerror = () => reject(new Error("이미지 열기 실패"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 // ---------- 디자인 ----------
 export function DesignsView() {
   const { items, reload } = useList<any>(() => api.designs.list());
   const [name, setName] = useState("");
+  const [tags, setTags] = useState("");
+  const [thumb, setThumb] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const pick = async (file?: File) => {
+    if (!file) return;
+    setErr("");
+    try { setThumb(await downscaleToDataUrl(file)); if (!name) setName(file.name.replace(/\.[^.]+$/, "")); }
+    catch (e: any) { setErr(e.message); }
+  };
+  const add = async () => {
+    if (!name && !thumb) return;
+    setBusy(true); setErr("");
+    try {
+      await api.designs.create({ name: name || "새 디자인", thumbnailUrl: thumb || undefined, tags: tags.split(",").map((t) => t.trim()).filter(Boolean) });
+      setName(""); setTags(""); setThumb(""); reload();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
   return (
     <div>
       <h2>네일 디자인 카탈로그</h2>
-      <div className="card form">
-        <input placeholder="디자인명" value={name} onChange={(e) => setName(e.target.value)} />
-        <button onClick={async () => { if (name) { await api.designs.create({ name, tags: [] }); setName(""); reload(); } }}>추가</button>
+      <div className="card design-form">
+        <label className="uploader">
+          {thumb ? <img src={thumb} className="up-preview" /> : <div className="up-empty">📷<br />이미지 선택</div>}
+          <input type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
+        </label>
+        <div className="design-fields">
+          <input placeholder="디자인명" value={name} onChange={(e) => setName(e.target.value)} />
+          <input placeholder="태그 (쉼표로 구분: 프렌치, 글리터)" value={tags} onChange={(e) => setTags(e.target.value)} />
+          <div className="row-btns">
+            <button className="primary" onClick={add} disabled={busy}>{busy ? "추가 중…" : "디자인 추가"}</button>
+            {thumb && <button onClick={() => setThumb("")}>이미지 지우기</button>}
+          </div>
+          {err && <div className="err">{err}</div>}
+          <div className="muted">사진을 올리면 자동으로 축소됩니다. 실제 네일 사진·레퍼런스 이미지를 등록하세요.</div>
+        </div>
       </div>
       <div className="grid">
         {items.map((d) => (
           <div key={d.id} className="dcard">
             <div className="dthumb">{d.thumbnailUrl ? <img src={d.thumbnailUrl} /> : "💅"}</div>
-            <div>{d.name}</div>
+            <div className="dname">{d.name}</div>
             <div>{(d.tags ?? []).map((t: string) => <span key={t} className="tag">{t}</span>)}</div>
+            <button className="dcard-del" title="삭제" onClick={async () => { if (confirm(`'${d.name}' 삭제?`)) { await api.designs.remove(d.id); reload(); } }}>🗑</button>
           </div>
         ))}
-        {!items.length && <div className="muted">디자인 없음</div>}
+        {!items.length && <div className="muted">디자인 없음 — 위에서 사진을 올려 추가하세요</div>}
       </div>
     </div>
   );
@@ -176,7 +226,7 @@ export function SettingsView() {
   };
   const test = async () => {
     setTesting(true); setTestMsg("");
-    try { const r = await api.settings.testEdge(); setTestMsg((r.ok ? "✅ " : "❌ ") + r.message); }
+    try { const r = await api.settings.testEdge({ host: s.phoneHost, port: s.phonePort }); setTestMsg((r.ok ? "✅ " : "❌ ") + r.message); }
     catch (e: any) { setTestMsg("❌ " + e.message); } finally { setTesting(false); }
   };
 

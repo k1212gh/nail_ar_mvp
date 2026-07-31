@@ -73,6 +73,7 @@ export async function routes(app: FastifyInstance) {
     const b = z.object({ name: z.string(), thumbnailUrl: z.string().optional(), meshRef: z.string().optional(), tags: z.array(z.string()).default([]) }).parse(req.body);
     return designOut(await prisma.design.create({ data: { ...b, tags: J.str(b.tags) } }));
   });
+  app.delete("/api/designs/:id", staff, async (req) => { await prisma.design.delete({ where: { id: (req.params as any).id } }); return { ok: true }; });
 
   // ---------- device profiles (제원 = 안경/edge 세팅) ----------
   app.get("/api/device-profiles", staff, async () => (await prisma.deviceProfile.findMany()).map(profileOut));

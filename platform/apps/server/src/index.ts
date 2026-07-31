@@ -9,7 +9,8 @@ import { registerAuth } from "./auth.js";
 import { routes } from "./routes.js";
 import { hub } from "./hub.js";
 
-const app = Fastify({ logger: { transport: undefined } });
+// bodyLimit 4MB — 디자인 썸네일(축소 data URL)이 JSON 본문으로 들어옴.
+const app = Fastify({ logger: { transport: undefined }, bodyLimit: 4 * 1024 * 1024 });
 
 await app.register(cors, { origin: true });
 await registerAuth(app);

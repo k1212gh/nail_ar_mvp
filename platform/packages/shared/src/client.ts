@@ -34,7 +34,11 @@ export function createClient(baseUrl: string, getToken: () => string | null) {
       remove: (id: string) => req(`${API.reservations}/${id}`, { method: "DELETE" }),
     },
     services: { list: () => req(API.services), create: (s: any) => req(API.services, { method: "POST", body: JSON.stringify(s) }) },
-    designs: { list: () => req(API.designs), create: (d: any) => req(API.designs, { method: "POST", body: JSON.stringify(d) }) },
+    designs: {
+      list: () => req(API.designs),
+      create: (d: any) => req(API.designs, { method: "POST", body: JSON.stringify(d) }),
+      remove: (id: string) => req(`${API.designs}/${id}`, { method: "DELETE" }),
+    },
     deviceProfiles: {
       list: () => req(API.deviceProfiles),
       create: (p: any) => req(API.deviceProfiles, { method: "POST", body: JSON.stringify(p) }),
