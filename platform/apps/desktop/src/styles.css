@@ -91,3 +91,4 @@ label > input { margin-left: 6px; }
 .dcard-del { position: absolute; top: 6px; right: 6px; border: 0; background: rgba(255,255,255,.85); border-radius: 8px; padding: 4px 7px; font-size: 13px; opacity: 0; transition: opacity .12s; }
 .dcard:hover .dcard-del { opacity: 1; }
 .dcard-del:hover { background: #c0392b; }
+.engine-badge { font-size: 13px; color: #55505e; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; align-self: flex-start; }

@@ -113,10 +113,17 @@ export async function routes(app: FastifyInstance) {
   });
 
   // ---------- stream control (중계 On/Off) ----------
-  app.get("/api/stream", { preHandler: app.authenticate }, async () => ({ ...hub.stream, viewerLink: relayBase ? `${relayBase}/monitor?token=${relayView}` : undefined }));
+  app.get("/api/stream", { preHandler: app.authenticate }, async () => {
+    const s = await getSettings();
+    // 대시보드가 활성 검출엔진을 표시할 수 있게 엔진 정보 동봉.
+    return { ...hub.stream, viewerLink: relayBase ? `${relayBase}/monitor?token=${relayView}` : undefined, edgeEngine: s.edgeEngine, phoneHost: s.phoneHost };
+  });
   app.post("/api/stream", staff, async (req, reply) => {
     const { on } = z.object({ on: z.boolean() }).parse(req.body);
     const s = await getSettings();
+    // 폰 엔진인데 IP 미설정이면 켜기 전에 명확히 차단(에이전트가 조용히 실패하는 것 방지).
+    if (on && s.edgeEngine === "phone" && !s.phoneHost)
+      return reply.code(400).send({ error: "폰 에지가 선택됨 — 설정 탭에서 폰 IP를 먼저 입력·저장하세요" });
     // stream.start 시 현재 검출 엔진/폰주소를 에이전트에 동봉 → 에이전트가 알맞은 파이프라인 구동
     const payload = on ? { edgeEngine: s.edgeEngine, phoneHost: s.phoneHost, phonePort: s.phonePort, penOcclusion: s.penOcclusion } : undefined;
     if (!hub.commandAgent(on ? "stream.start" : "stream.stop", payload)) return reply.code(409).send({ error: "안경측 PC 에이전트 미접속" });

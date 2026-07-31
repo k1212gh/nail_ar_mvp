@@ -17,7 +17,10 @@ function useList<T>(loader: () => Promise<T[]>, deps: any[] = []) {
 export function StreamView({ stream, setStream }: { stream: StreamSession; setStream: (s: StreamSession) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [engine, setEngine] = useState<{ edgeEngine?: string; phoneHost?: string }>({});
   const on = stream.state === "on" || stream.state === "starting";
+  useEffect(() => { api.stream.get().then((s: any) => setEngine({ edgeEngine: s.edgeEngine, phoneHost: s.phoneHost })).catch(() => {}); }, [stream.state]);
+  const engineLabel = engine.edgeEngine === "phone" ? `📱 폰${engine.phoneHost ? ` (${engine.phoneHost})` : " ⚠️IP미설정"}` : "🖥️ 이 PC";
   const toggle = async () => {
     setBusy(true); setErr("");
     try { const r = await api.stream.set(!on); setStream({ ...stream, state: r.state }); }
@@ -33,6 +36,7 @@ export function StreamView({ stream, setStream }: { stream: StreamSession; setSt
             {stream.fps != null && <> · {stream.fps.toFixed(0)}fps</>}
             {stream.glassesConnected != null && <> · 안경 {stream.glassesConnected ? "연결" : "미연결"}</>}
           </div>
+          <div className="engine-badge">검출 엔진: <b>{engineLabel}</b></div>
           <button className={on ? "big danger" : "big primary"} onClick={toggle} disabled={busy}>
             {busy ? "…" : on ? "■ 중계 끄기" : "▶ 중계 켜기"}
           </button>
