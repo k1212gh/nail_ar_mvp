@@ -51,7 +51,9 @@
 3. **[불가] OST NailGuide 가림** — 물리한계. 시도 말 것. OST는 "대략 위치" 가이드용으로만.
 
 ## 지금 내가 미리 할 수 있는 것 (빌드 없이 검증)
-- [ ] edge_serve /infer에 occMask 동봉(옵션 env) + 파이썬에서 왕복 검증.
-- [ ] EdgeClient.cs 파서 필드 추가(컴파일은 Unity에서 확인).
+- [x] **edge_serve /infer에 occMask 동봉** — `NAIL_OCC_MASK=1`이면 `res["occMask"]={w,h,jpg(base64)}`.
+  검증: vf_076 → 96×128 마스크 **base64 676B**, 디코드 max=79, JSON 총 1993B. (비용: pen_soft_mask 추가연산 → fps↓, 기본 off.)
+- [x] **EdgeClient.cs 파서** — `[Serializable] OccMask{w,h,jpg}` + `InferResult.occMask`. JsonUtility 호환·하위호환(컴파일은 Unity서 확인).
 - [x] magic_mirror 합성뷰(경로1) — 완료.
-- 셰이더/렌더러 실적용은 형이 Unity 열 때 30분.
+- **남은 것(형 Unity, ~30분)**: NailBakedGloss.shader에 `_OccTex` 샘플(위 초안) + NailMeshRenderer가
+  `occMask.jpg → Texture2D.LoadImage → material._OccTex` 업로드. **NailMirror 씬에서만**(OST 아님).

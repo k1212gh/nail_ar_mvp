@@ -138,6 +138,8 @@ def _infer_jpeg(buf: bytes, want_card: bool = False) -> dict:
     res = {"ok": True, "w": w, "h": h, "ms": round(ms, 1), "nails": nails}
     if want_card:
         _attach_card_scale(img, res)
+    if OCC_MASK:
+        _attach_occ_mask(img, res)
     return res
 
 
@@ -320,6 +322,35 @@ try:
     import magic_mirror as _MM   # 매직미러 렌더러(디자인 젤 그라데이션 + 펜 가림) 단일 소스
 except Exception:
     _MM = None
+
+# --- OCC MASK (안경 온디바이스 가림용) — 검출응답에 저해상 펜 가림 마스크 동봉 ------------------
+# 안경 NailMirror 셰이더가 스크린공간에서 샘플해 디자인 알파를 낮춘다(docs/GLASSES_OCCLUSION_PLAN).
+# 비용: pen_soft_mask 추가연산 → 검출 fps 하락. 기본 off, NAIL_OCC_MASK=1 일 때만.
+OCC_MASK = os.environ.get("NAIL_OCC_MASK", "0") == "1"
+OCC_MASK_W = int(os.environ.get("NAIL_OCC_MASK_W", "96"))
+try:
+    import pen_occlusion as _POCC
+except Exception:
+    _POCC = None
+
+
+def _attach_occ_mask(img, res: dict) -> None:
+    """res["occMask"] = {w,h,jpg(base64 grayscale)} — 손톱 위 펜 가림 저해상 마스크."""
+    import base64
+    if _POCC is None:
+        return
+    contours = [nd.get("contour") for nd in res.get("nails", []) if nd.get("contour")]
+    if not contours:
+        res["occMask"] = {"w": 0, "h": 0}
+        return
+    h, w = img.shape[:2]
+    soft = _POCC.pen_soft_mask(img, contours)              # 0..1 원본크기(내부 max_dim 자기보호)
+    mw = OCC_MASK_W
+    mh = max(1, round(h * mw / w))
+    small = cv2.resize((np.clip(soft, 0, 1) * 255).astype(np.uint8), (mw, mh))
+    ok, enc = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 75])
+    if ok:
+        res["occMask"] = {"w": mw, "h": mh, "jpg": base64.b64encode(enc.tobytes()).decode("ascii")}
 
 
 def _occ_demo_overlay(im, nl):

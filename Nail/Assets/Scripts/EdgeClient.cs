@@ -61,6 +61,16 @@ public class CardInfo
     public float longPx;      // detected card long-edge length (px) — diagnostics
 }
 
+// 저해상 펜 가림 마스크(base64 JPEG grayscale). edge_serve NAIL_OCC_MASK=1 일 때만 채워짐.
+// 매직미러(NailMirror) 셰이더가 Texture2D.LoadImage(Convert.FromBase64String(jpg)) 로 올려
+// 스크린공간에서 샘플 → 펜 지나는 곳 디자인 알파를 낮춘다(docs/GLASSES_OCCLUSION_PLAN.md).
+[Serializable]
+public class OccMask
+{
+    public int w, h;
+    public string jpg;        // base64 JPEG grayscale (w×h). 빈 문자열이면 가림 없음.
+}
+
 [Serializable]
 public class InferResult
 {
@@ -70,6 +80,7 @@ public class InferResult
     public List<NailRoi> nails = new List<NailRoi>();
     public EnrollStatus enroll;
     public CardInfo card;     // present only with ?card=1
+    public OccMask occMask;   // present only with NAIL_OCC_MASK=1 (NailMirror 가림용)
 }
 
 // Accept the edge server's self-signed cert (local dev only). edge_serve.py = HTTPS:8443.
