@@ -316,33 +316,19 @@ _DUMP = {"t": 0.0, "n": 0}
 # NAIL_OCC_DEMO=1 이면 모니터에 손톱마다 색 디자인을 얹고 pen_occlusion으로 펜을 뚫어 보이게 한다.
 # (사장님이 릴레이로 보는 화면에서 "펜이 디자인을 가린다"를 눈으로 확인). 기본 off.
 OCC_DEMO = os.environ.get("NAIL_OCC_DEMO", "0") == "1"
-_OCC_COLS = [(210, 90, 230), (240, 190, 90), (110, 210, 130), (90, 150, 240)]
 try:
-    import pen_occlusion as _PO
+    import magic_mirror as _MM   # 매직미러 렌더러(디자인 젤 그라데이션 + 펜 가림) 단일 소스
 except Exception:
-    _PO = None
+    _MM = None
 
 
 def _occ_demo_overlay(im, nl):
-    """손톱에 데모 디자인을 합성하되 펜이 지나는 곳은 pen_occlusion으로 뚫어 보이게 한다."""
-    if _PO is None:
+    """매직미러: 손톱에 디자인을 얹고 펜이 지나는 곳은 투명하게(펜이 비침). web/magic_mirror.py 사용."""
+    if _MM is None or not nl:
         return im
-    h, w = im.shape[:2]
-    contours = [nd.get("contour") for nd in nl if nd.get("contour")]
-    if not contours:
-        return im
-    dcol = np.zeros((h, w, 3), np.float32)
-    da = np.zeros((h, w), np.float32)
-    for i, c in enumerate(contours):
-        m = np.zeros((h, w), np.uint8)
-        cv2.fillPoly(m, [np.array(c, np.int32).reshape(-1, 1, 2)], 255)
-        mb = m > 0
-        dcol[mb] = _OCC_COLS[i % len(_OCC_COLS)]
-        da[mb] = 0.85
-    soft = _PO.pen_soft_mask(im, contours)
-    out = _PO.apply_occlusion(im, dcol, da, soft)
+    out = _MM.render(im, nl, occlude=True)
     cv2.putText(out, "OCCLUSION DEMO  (pen shows through design)",
-                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                (10, out.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     return out
 
 

@@ -21,6 +21,7 @@ export function createClient(baseUrl: string, getToken: () => string | null) {
     login: (name: string, password: string): Promise<LoginResult> =>
       req(API.auth.login, { method: "POST", body: JSON.stringify({ name, password }) }),
     me: () => req(API.auth.me),
+    changePassword: (current: string, next: string) => req(API.auth.password, { method: "POST", body: JSON.stringify({ current, next }) }),
     members: {
       list: () => req(API.members),
       create: (m: any) => req(API.members, { method: "POST", body: JSON.stringify(m) }),

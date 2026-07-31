@@ -290,6 +290,36 @@ export function SettingsView() {
         {saved && <span className="ok-msg">저장됨 ✓</span>}
         {err && <span className="err">{err}</span>}
       </div>
+
+      <h2 style={{ marginTop: 32 }}>계정</h2>
+      <PasswordCard />
+    </div>
+  );
+}
+
+// 비밀번호 변경 카드 (기본 nail1234 → 실운영 전 교체)
+function PasswordCard() {
+  const [cur, setCur] = useState("");
+  const [nx, setNx] = useState("");
+  const [nx2, setNx2] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const submit = async () => {
+    setMsg(null);
+    if (nx.length < 4) return setMsg({ ok: false, text: "새 비밀번호는 4자 이상" });
+    if (nx !== nx2) return setMsg({ ok: false, text: "새 비밀번호가 서로 다릅니다" });
+    try { await api.changePassword(cur, nx); setMsg({ ok: true, text: "비밀번호가 변경되었습니다" }); setCur(""); setNx(""); setNx2(""); }
+    catch (e: any) { setMsg({ ok: false, text: e.message }); }
+  };
+  return (
+    <div className="card">
+      <h3>비밀번호 변경</h3>
+      <div className="form">
+        <input type="password" placeholder="현재 비밀번호" value={cur} onChange={(e) => setCur(e.target.value)} />
+        <input type="password" placeholder="새 비밀번호" value={nx} onChange={(e) => setNx(e.target.value)} />
+        <input type="password" placeholder="새 비밀번호 확인" value={nx2} onChange={(e) => setNx2(e.target.value)} />
+        <button className="primary" onClick={submit} disabled={!cur || !nx}>변경</button>
+      </div>
+      {msg && <div className={msg.ok ? "ok-msg" : "err"}>{msg.text}</div>}
     </div>
   );
 }

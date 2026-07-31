@@ -21,6 +21,14 @@ export async function routes(app: FastifyInstance) {
     return { token, user: { id: u.id, name: u.name, role: u.role } };
   });
   app.get("/api/auth/me", { preHandler: app.authenticate }, async (req) => req.user);
+  // 본인 비밀번호 변경 (기본 nail1234 → 실운영 전 교체). 현재 비번 확인 후 갱신.
+  app.post("/api/auth/password", { preHandler: app.authenticate }, async (req, reply) => {
+    const b = z.object({ current: z.string(), next: z.string().min(4) }).parse(req.body);
+    const u = await prisma.user.findUnique({ where: { id: (req.user as any).sub } });
+    if (!u?.passwordHash || !(await verify(b.current, u.passwordHash))) return reply.code(400).send({ error: "현재 비밀번호가 올바르지 않습니다" });
+    await prisma.user.update({ where: { id: u.id }, data: { passwordHash: await hash(b.next) } });
+    return { ok: true };
+  });
 
   // ---------- members ----------
   app.get("/api/members", staff, async () => (await prisma.member.findMany({ orderBy: { createdAt: "desc" } })).map(memberOut));

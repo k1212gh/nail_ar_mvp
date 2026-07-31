@@ -4,7 +4,7 @@ export * from "./client.js";
 
 /** 백엔드 REST 경로 상수 (프론트 3종 공유). */
 export const API = {
-  auth: { login: "/api/auth/login", me: "/api/auth/me" },
+  auth: { login: "/api/auth/login", me: "/api/auth/me", password: "/api/auth/password" },
   members: "/api/members",
   reservations: "/api/reservations",
   services: "/api/services",
