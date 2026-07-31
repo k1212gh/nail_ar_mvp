@@ -353,11 +353,24 @@ def _attach_occ_mask(img, res: dict) -> None:
         res["occMask"] = {"w": mw, "h": mh, "jpg": base64.b64encode(enc.tobytes()).decode("ascii")}
 
 
+# NAIL_DESIGN=samples/designs/glitter.png 처럼 지정하면 그 디자인 텍스처를 손톱에 입힌다(없으면 젤 그라데이션).
+_OCC_DESIGN = os.environ.get("NAIL_DESIGN", "")
+_occ_tex = None
+if _OCC_DESIGN:
+    try:
+        _occ_tex = cv2.imread(_OCC_DESIGN)
+    except Exception:
+        _occ_tex = None
+
+
 def _occ_demo_overlay(im, nl):
     """매직미러: 손톱에 디자인을 얹고 펜이 지나는 곳은 투명하게(펜이 비침). web/magic_mirror.py 사용."""
     if _MM is None or not nl:
         return im
-    out = _MM.render(im, nl, occlude=True)
+    if _occ_tex is not None:
+        out = _MM.render_textured(im, nl, _occ_tex, occlude=True)   # 실제 디자인 텍스처
+    else:
+        out = _MM.render(im, nl, occlude=True)                       # 젤 그라데이션
     cv2.putText(out, "OCCLUSION DEMO  (pen shows through design)",
                 (10, out.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     return out
