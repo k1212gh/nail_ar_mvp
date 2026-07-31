@@ -90,6 +90,21 @@
   에이전트가 파이프라인 구동 → 앱 라이브뷰에 GLASSES AR + YOLO DETECT 양 패널 송출 확인.
   (보안·UX·성능 보완은 `docs/IMPROVEMENT_BACKLOG.md` 참조.)
 
+## 5c. 자율 연속작업 2차 (저녁, 무선·가림 심화)
+
+- **트랙A — 폰 Edge Server APK 빌드**: `android/`를 buildkit(gradle 8.9+JDK17)로 재빌드 →
+  **app-debug.apk 182MB(onnx 포함)** 산출. 폰 연결되면 `adb install`만 하면 됨. (폰은 형이 가져가심.)
+- **트랙B — 매직미러 가림**: `web/magic_mirror.py`(카메라+젤그라데이션 디자인+펜가림) + before/after
+  영상도구. **"펜이 여전히 가리는데?"의 답**: 가림은 디자인을 **PC/폰이 그리는 매직미러 경로에선 됨**(증명
+  영상 `_demo/pen_occlusion_before_after.jpg`), **안경이 스스로 그리는 화면엔 아직 안 됨**. edge_serve
+  `NAIL_OCC_DEMO`를 magic_mirror로 연결.
+- **트랙C — 안경 가림 통합계획**(docs/GLASSES_OCCLUSION_PLAN): **OST(NailGuide)는 4m 시차로 가림 불가**,
+  **매직미러(NailMirror)에서만** 가능. 경로1(PC/폰 합성=지금 됨)·경로2(안경 온디바이스, 재빌드 1회, 셰이더
+  초안 포함) 정리.
+- **트랙D — 보안 보완**: **비밀번호 변경** 기능(설정탭) 배포·검증(원복까지). [[nailar-oracle-remote-monitor]]
+  JWT 시크릿 주입 유지.
+- **무선 설계**(docs/WIRELESS_PHONE_GLASSES_DESIGN): 완전무선(폰+안경) 3단계 로드맵.
+
 ## 6. 남은 일 / 다음
 
 - [ ] 펜 가림 **온디바이스 셰이더**(Unity 재빌드 1회) — 안경 실렌더 적용.
