@@ -86,3 +86,7 @@ Thumbs.db
 
 # Electron 패키지 산출물(대용량)
 platform/apps/desktop/dist-app/
+
+# 데모 산출물(대용량 미디어)
+_demo/
+android/app/src/main/assets/nails_seg.onnx
