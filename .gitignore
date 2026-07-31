@@ -1,3 +1,4 @@
+# 대용량 펜 테스트 샘플(로컬 보존, git 제외)
 # ===== 시크릿 / 키 (절대 커밋 금지) =====
 certs/
 **/telegram_config.json
@@ -90,3 +91,7 @@ platform/apps/desktop/dist-app/
 # 데모 산출물(대용량 미디어)
 _demo/
 android/app/src/main/assets/nails_seg.onnx
+samples/pen/
+samples/pen_photos/
+samples/pen_test/
+samples/pen_vsample/
