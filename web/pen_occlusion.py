@@ -48,12 +48,19 @@ def contours_to_masks(contours, h, w):
     return [_fill(c, h, w) for c in contours if c]
 
 
-def pen_soft_mask(im_bgr, contours):
+def pen_soft_mask(im_bgr, contours, max_dim=768):
     """손톱 위 펜/도구를 검출한 0..1 소프트 가림 가중치(H,W float32) 반환.
 
     contours: 손톱 외곽선 리스트(List[List[[x,y]]]). 편차/연결성분으로 펜만 남긴다.
+    성능주의: 비용이 픽셀수에 비례(원본 1824²≈900ms vs 320²≈15ms). max_dim 초과 프레임은
+    자동으로 축소해 계산 후 원본크기로 업스케일 → 검출해상도급(≤768)으로 항상 빠르게 유지.
     """
     h, w = im_bgr.shape[:2]
+    if max(h, w) > max_dim:   # 큰 프레임은 축소해 계산(자기보호) 후 soft를 원본크기로 복원
+        s = max_dim / float(max(h, w))
+        small = cv2.resize(im_bgr, (max(1, int(w * s)), max(1, int(h * s))))
+        sc = [[[p[0] * s, p[1] * s] for p in c] for c in contours]
+        return cv2.resize(pen_soft_mask(small, sc, max_dim), (w, h))
     lab = cv2.cvtColor(im_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
     soft = np.zeros((h, w), np.float32)
     k_app = np.ones((APP_ERODE, APP_ERODE), np.uint8)
