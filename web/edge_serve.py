@@ -312,6 +312,39 @@ PEN_PROBE = os.environ.get("PEN_PROBE", "1") == "1"
 _DUMP_DIR = os.environ.get("DUMP_DIR", "")   # set -> save raw frames here (A단계 오프라인 테스트 수집)
 _DUMP = {"t": 0.0, "n": 0}
 
+# --- OCCLUSION DEMO (B-stage) — 실제 펜 가림방지 라이브 실증 ------------------------------------
+# NAIL_OCC_DEMO=1 이면 모니터에 손톱마다 색 디자인을 얹고 pen_occlusion으로 펜을 뚫어 보이게 한다.
+# (사장님이 릴레이로 보는 화면에서 "펜이 디자인을 가린다"를 눈으로 확인). 기본 off.
+OCC_DEMO = os.environ.get("NAIL_OCC_DEMO", "0") == "1"
+_OCC_COLS = [(210, 90, 230), (240, 190, 90), (110, 210, 130), (90, 150, 240)]
+try:
+    import pen_occlusion as _PO
+except Exception:
+    _PO = None
+
+
+def _occ_demo_overlay(im, nl):
+    """손톱에 데모 디자인을 합성하되 펜이 지나는 곳은 pen_occlusion으로 뚫어 보이게 한다."""
+    if _PO is None:
+        return im
+    h, w = im.shape[:2]
+    contours = [nd.get("contour") for nd in nl if nd.get("contour")]
+    if not contours:
+        return im
+    dcol = np.zeros((h, w, 3), np.float32)
+    da = np.zeros((h, w), np.float32)
+    for i, c in enumerate(contours):
+        m = np.zeros((h, w), np.uint8)
+        cv2.fillPoly(m, [np.array(c, np.int32).reshape(-1, 1, 2)], 255)
+        mb = m > 0
+        dcol[mb] = _OCC_COLS[i % len(_OCC_COLS)]
+        da[mb] = 0.85
+    soft = _PO.pen_soft_mask(im, contours)
+    out = _PO.apply_occlusion(im, dcol, da, soft)
+    cv2.putText(out, "OCCLUSION DEMO  (pen shows through design)",
+                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    return out
+
 
 def _pen_probe_overlay(im, nl):
     """Colour-code candidate pen/occluder pixels inside (a dilation of) the nail region."""
@@ -358,7 +391,9 @@ def _update_monitor(body: bytes, res: dict) -> None:
             if cont:
                 cv2.polylines(im, [np.array(cont, np.int32).reshape(-1, 1, 2)], True, (0, 255, 0), 2)
             cv2.circle(im, (int(nd.get("cx", 0)), int(nd.get("cy", 0))), 4, (0, 0, 255), -1)
-        if PEN_PROBE and nl:
+        if OCC_DEMO and nl:
+            im = _occ_demo_overlay(im, nl)       # B-stage: 실제 펜 가림 라이브 실증
+        elif PEN_PROBE and nl:
             im = _pen_probe_overlay(im, nl)      # A-stage: visualise pen/occluder cues
         if MON_ROT == "cw":
             im = cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)       # 90° 장착 카메라를 세워서 보기(뷰 전용)

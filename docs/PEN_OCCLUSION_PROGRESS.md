@@ -59,3 +59,36 @@ $env:PEN_PROBE="1"; $env:DUMP_DIR="<폴더>"
    `NailOverlayRenderer`/`NailMeshRenderer` 양쪽에 적용. 마스크는 (a) 셰이더가 피드 직접 샘플 or
    (b) 서버가 준 폴리곤을 래스터화 — 둘 다 캔버스 공통변환이라 UV 일관.
 3. **[병행] 폰 단독 구동 가능성** 조사 — 브러시 오기 전 노트북 세션에서 진행(별도 문서).
+
+---
+
+## 완성 (2026-07-31) — 실측 187장 검증 + 라이브 모듈화
+
+**테스트셋**: 안경으로 촬영한 손+손톱+펜 실사진 10장(`samples/pen_photos/`) + 영상 프레임 177장
+(`samples/pen/vf_*.jpg`, penvid.mp4에서 mpdecimate 추출). YOLO가 프레임당 손톱 2~6개 검출.
+
+**최종 알고리즘**(`web/pen_occlusion.py`, 단일 소스):
+- 손톱 코어(erode) Lab 중앙값 대비 편차 → 정규화 가중치.
+- **하이라이트 제외**: 손톱보다 밝은(L↑) 스펙큘러는 occluder 아님 → 가중치 `*hl`로 제거.
+  (이전 ~25% 오탐 바닥의 주범이던 손톱 반사 오탐이 거의 사라짐 — weight맵이 near-zero로 깨끗.)
+- **연결성분 필터**: (면적 큼) AND (길쭉 OR 손톱경계 밖으로 뻗음)인 성분만 펜으로 채택.
+  손톱 안 작은 무늬/노이즈 탈락.
+- **경계 링 제거**: 디자인 가림은 손톱 5px erode 안쪽에만 적용 → nail↔skin 전환 오탐 제거.
+
+**검증 결과**: 검은 펜/금속 페룰이 손톱을 가로지르는 프레임(vf_076 등)에서 디자인이 펜 위에서
+자연스럽게 흐려져 **펜이 비쳐 보임**(design_alpha = nail AND NOT pen 달성). 손톱 밖(손가락 주름)
+잔여 오탐은 손톱 안에만 적용하므로 디자인에 영향 없음.
+
+**한계**(변함없음): 색-편차 접근이라 손톱과 색이 비슷한 도구(살색 연필)는 약함. 실전 도구가
+검은 펜/금속 브러시면 충분. 완전 무색차 대응은 학습형 세그멘테이션 필요(추후).
+
+**파라미터**: `DEV_LO,DEV_HI=22,60; BIN_THR=0.35; MARGIN=14; MIN_AREA_FRAC=0.04; ELONG_MIN=2.2;
+MARGIN_FRAC=0.12; HL_TOL=7; HL_RANGE=20; APP_ERODE=5; PEN_DIM=0.15`.
+
+**라이브 통합**:
+- `web/pen_occlusion.py` — `pen_soft_mask(bgr, contours)` + `apply_occlusion(bg, dcol, da, soft)`.
+  테스트도구 `tools/pen_probe/pen_mask_v2.py`도 이 모듈을 import(코드 단일화).
+- `web/edge_serve.py` 모니터에 **가림 데모 옵션**: `NAIL_OCC_DEMO=1`이면 손톱에 데모 디자인을
+  얹고 펜을 뚫어 보여줌 → 사장님이 릴레이(`/monitor`)로 실시간 확인 가능(기본 off).
+- **온디바이스 셰이더(Unity B단계)**는 남음: 이 `soft` 마스크로 `NailMeshRenderer` 디자인 알파를
+  곱하면 안경 실렌더에도 적용. 서버가 폴리곤+soft를 내려주거나 셰이더가 피드 직접 샘플.
