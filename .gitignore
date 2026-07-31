@@ -83,3 +83,6 @@ camera_calib.json
 Thumbs.db
 .vscode/
 *.swp
+
+# Electron 패키지 산출물(대용량)
+platform/apps/desktop/dist-app/

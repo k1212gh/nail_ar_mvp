@@ -1,9 +1,7 @@
-// Electron 메인 — dev면 Vite 서버, 그 외엔 배포 백엔드 URL(같은 오리진 API+웹) 로드.
-// file://로 로컬 dist를 열면 /api 상대경로가 안 붙으므로, 배포 서버 URL을 직접 로드한다.
-// 대상 서버는 NAIL_APP_URL 환경변수로 바꿀 수 있다(사내 다른 서버/로컬 3001 등).
+// 네일샵 백오피스 데스크톱(윈도우) 앱 — 배포 백엔드 URL을 감싸는 네이티브 창.
+// 서버 = API+웹 같은 오리진(@fastify/static). NAIL_APP_URL 로 대상 서버 변경 가능.
 const { app, BrowserWindow, Menu } = require("electron");
 
-const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const APP_URL = process.env.NAIL_APP_URL || "http://161.33.176.78:3001";
 
 function createWindow() {
@@ -13,12 +11,11 @@ function createWindow() {
     title: "네일샵 백오피스",
     webPreferences: { contextIsolation: true },
   });
-  win.loadURL(DEV_URL || APP_URL);
-  // 연결 실패 시 안내(서버 꺼짐/네트워크). 5초 후 재시도.
+  win.loadURL(APP_URL);
   win.webContents.on("did-fail-load", (_e, code, desc) => {
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(
       `<body style="font-family:system-ui;background:#f6f5f8;color:#1e1b24;text-align:center;padding-top:15%">
-       <h2>💅 서버에 연결 중…</h2><p style="color:#8a8593">${APP_URL}<br>(${desc||code}) 5초 후 재시도</p></body>`));
+       <h2>💅 서버에 연결 중…</h2><p style="color:#8a8593">${APP_URL}<br>(${desc || code}) 5초 후 재시도</p></body>`));
     setTimeout(() => win.loadURL(APP_URL), 5000);
   });
 }

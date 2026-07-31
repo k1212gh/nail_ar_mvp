@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview --port 5174",
     "electron": "electron .",
+    "package:win": "electron-packager standalone \"NailShop-BackOffice\" --platform=win32 --arch=x64 --electron-version=31.3.1 --out=dist-app --overwrite --app-version=1.0.0",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

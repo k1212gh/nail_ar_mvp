@@ -78,6 +78,18 @@
 - `627b300` 검출 엔진 선택(PC/폰) — 설정 탭
 - (진행) 디자인 업로드 + 삭제 + testEdge UX
 
+## 5b. 실기기 라이브 검증 (2026-07-31 오후, 안경+폰 연결됨)
+
+- **PC 에지 파이프라인 실작동 확인**: 안경(RayNeo X3) 카메라 → adb reverse → edge_serve YOLO
+  **7.5fps 검출** → 컴포지터 → 오라클 릴레이 **15fps 송출** → 원격 시청(릴레이 프레임 실측). 손톱을 안경에
+  비추면 검출. **펜 가림 데모(NAIL_OCC_DEMO=1)**: 엄지손톱에 마젠타 디자인 실시간 오버레이 + 펜 가림 확인.
+- **윈도우 앱(Electron) 패키징·배포**: `apps/desktop/standalone/`(배포 백엔드 URL 래퍼) →
+  `@electron/packager`로 **NailShop-BackOffice.exe**(win32-x64, 257MB) 산출. 실행→VM 백엔드 자동 로그인,
+  대시보드/엔진배지/라이브뷰 정상. `pnpm --filter @nail/desktop package:win`으로 재빌드. dist-app은 gitignore.
+- **앱에서 원격 모니터링 실작동**: @nail/agent를 샵 PC에 띄워 VM WS 접속 → 앱 "중계 켜기" →
+  에이전트가 파이프라인 구동 → 앱 라이브뷰에 GLASSES AR + YOLO DETECT 양 패널 송출 확인.
+  (보안·UX·성능 보완은 `docs/IMPROVEMENT_BACKLOG.md` 참조.)
+
 ## 6. 남은 일 / 다음
 
 - [ ] 펜 가림 **온디바이스 셰이더**(Unity 재빌드 1회) — 안경 실렌더 적용.

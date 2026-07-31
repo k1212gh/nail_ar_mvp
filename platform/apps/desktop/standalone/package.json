@@ -1,0 +1,9 @@
+{
+  "name": "nail-backoffice-desktop",
+  "productName": "네일샵 백오피스",
+  "version": "1.0.0",
+  "description": "네일샵 백오피스 데스크톱 앱 (배포 백엔드 래퍼)",
+  "main": "main.cjs",
+  "author": "NailShop",
+  "license": "UNLICENSED"
+}
