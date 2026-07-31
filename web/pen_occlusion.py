@@ -33,6 +33,8 @@ MARGIN_FRAC = 0.12           # 성분이 margin(밖)에 이만큼 걸치면 '경
 HL_TOL = 7.0                 # 손톱보다 이만큼 밝으면 하이라이트로 간주 시작
 HL_RANGE = 20.0              # 이 밝기차 위는 완전 하이라이트(occluder 제외)
 APP_ERODE = 5                # 디자인 가림 적용 전 손톱 erode(경계 링 오탐 제거)
+COVER_HI = 0.60              # 성분이 손톱의 이 이상을 덮으면 '펜 줄무늬' 아닌 전역색변(블러/조명) 의심
+COVER_FLOOR = 0.35          # 손톱 전체를 덮는 성분의 최소 잔여 가중치(완전 억제는 안 함)
 
 
 def _fill(contour, h, w):
@@ -76,7 +78,7 @@ def pen_soft_mask(im_bgr, contours):
         n, lbl, stats, _ = cv2.connectedComponentsWithStats(cand, 8)
         nail_area = mb.sum()
         margin_only = dil & ~mb
-        keep = np.zeros((h, w), np.uint8)
+        keep_w = np.zeros((h, w), np.float32)   # 성분별 가중치(커버리지 감쇠 포함)
         for i in range(1, n):
             comp = lbl == i
             area = int(comp.sum())
@@ -88,9 +90,12 @@ def pen_soft_mask(im_bgr, contours):
             elong = (ev[-1] / max(ev[0], 1e-3)) ** 0.5
             crosses = (comp & margin_only).sum() / max(area, 1)
             if elong >= ELONG_MIN or crosses >= MARGIN_FRAC:
-                keep |= comp.astype(np.uint8)
+                # 손톱 안쪽을 얼마나 덮나 — 대부분 덮으면(펜 줄무늬 아님) 감쇠
+                cover = (comp & mb).sum() / max(nail_area, 1)
+                cf = 1.0 if cover <= COVER_HI else max(COVER_FLOOR, 1.0 - (cover - COVER_HI) / (1.0 - COVER_HI))
+                np.maximum(keep_w, comp.astype(np.float32) * cf, out=keep_w)
         app = cv2.erode(m, k_app, iterations=1) > 0     # 경계 링 제외 → 안쪽에만 가림
-        soft[app] = np.maximum(soft[app], (wn * (keep > 0))[app])
+        soft[app] = np.maximum(soft[app], (wn * keep_w)[app])
     return cv2.GaussianBlur(soft, (0, 0), 1.2)
 
 
