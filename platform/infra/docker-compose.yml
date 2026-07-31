@@ -1,0 +1,38 @@
+# 오라클 VM(nail-relay2, 161.33.176.78)에서 플랫폼 백엔드 스택 구동.
+# 기존 릴레이 컨테이너(nail-relay)는 그대로 두고, 여기에 postgres+backend+caddy 추가.
+#   배포:  scp -r infra apps packages ... ubuntu@VM:~/platform  &&  cd ~/platform/infra && docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: nail
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nail}
+      POSTGRES_DB: nail
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 외부 노출 안 함 (백엔드만 접근)
+
+  backend:
+    build: { context: .., dockerfile: apps/server/Dockerfile }
+    restart: always
+    depends_on: [postgres]
+    environment:
+      DATABASE_URL: postgresql://nail:${DB_PASSWORD:-nail}@postgres:5432/nail?schema=public
+      JWT_SECRET: ${JWT_SECRET:?set-in-.env}
+      PORT: "3001"
+    # 3001은 caddy 뒤로 (직접 노출 대신 caddy 프록시)
+    expose: ["3001"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on: [backend]
+    ports: ["3443:443", "3080:80"]   # 릴레이 8090과 안 겹치게. 도메인 붙이면 443로.
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+
+volumes:
+  pgdata:
+  caddydata:

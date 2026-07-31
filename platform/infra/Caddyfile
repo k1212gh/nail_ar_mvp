@@ -1,0 +1,8 @@
+# 도메인 없으면 IP + 내부TLS(self-signed). 도메인 생기면 이 줄을 도메인으로 바꾸면 자동 HTTPS.
+# API + WebSocket을 백엔드로 프록시.
+:443 {
+	tls internal
+	reverse_proxy /api/* backend:3001
+	reverse_proxy /ws    backend:3001
+	# 정적(데스크톱은 로컬앱이라 서빙 불필요; 필요시 여기에 웹클라 추가)
+}

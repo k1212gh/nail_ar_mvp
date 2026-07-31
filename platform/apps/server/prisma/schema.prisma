@@ -1,0 +1,98 @@
+// 네일샵 플랫폼 DB. 개발=SQLite(무설정 실행), 프로덕션(VM)=Postgres로 스위치.
+// SQLite 호환 위해: enum→String(zod가 검증), 배열→Json.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  role         String   @default("staff") // owner|staff|customer
+  phone        String?
+  passwordHash String?
+  memberId     String?  @unique
+  member       Member?  @relation(fields: [memberId], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model Member {
+  id                 String        @id @default(cuid())
+  name               String
+  phone              String
+  memo               String?
+  tags               String        @default("[]") // JSON string[]
+  preferredDesignIds String        @default("[]") // JSON string[]
+  user               User?
+  reservations       Reservation[]
+  visits             Visit[]
+  createdAt          DateTime      @default(now())
+}
+
+model Service {
+  id           String        @id @default(cuid())
+  name         String
+  durationMin  Int
+  price        Int?
+  category     String?
+  reservations Reservation[]
+}
+
+model Reservation {
+  id        String   @id @default(cuid())
+  member    Member?  @relation(fields: [memberId], references: [id])
+  memberId  String?
+  name      String
+  phone     String
+  service   Service? @relation(fields: [serviceId], references: [id])
+  serviceId String?
+  startAt   DateTime
+  endAt     DateTime
+  status    String   @default("requested") // requested|confirmed|done|canceled|noshow
+  source    String   @default("staff") // staff|self
+  staffId   String?
+  designId  String?
+  photoUrls String   @default("[]") // JSON string[]
+  memo      String?
+  createdAt DateTime @default(now())
+}
+
+model Visit {
+  id        String   @id @default(cuid())
+  member    Member   @relation(fields: [memberId], references: [id])
+  memberId  String
+  date      DateTime @default(now())
+  service   String?
+  staffId   String?
+  designId  String?
+  photoUrls String   @default("[]")
+}
+
+model Design {
+  id           String  @id @default(cuid())
+  name         String
+  thumbnailUrl String?
+  meshRef      String?
+  tags         String  @default("[]") // JSON string[]
+}
+
+// 제원 = 안경/edge 세팅 프로필 (push_calib.py 대체)
+model DeviceProfile {
+  id        String   @id @default(cuid())
+  label     String
+  type      String // glasses|phone|edge
+  settings  String   @default("{}") // JSON object
+  active    Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+// 샵 전역 설정 KV (검출 엔진 선택 등). value = JSON 문자열.
+model Setting {
+  key       String   @id
+  value     String   @default("null")
+  updatedAt DateTime @updatedAt
+}

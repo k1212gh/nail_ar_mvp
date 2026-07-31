@@ -1,0 +1,21 @@
+{
+  "name": "@nail/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "안경측 로컬 PC 상주 에이전트. VM 백엔드 WS 명령으로 중계(edge_serve+컴포지터) start/stop.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nail/shared": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.4"
+  }
+}
