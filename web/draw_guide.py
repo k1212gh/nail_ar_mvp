@@ -53,6 +53,22 @@ def stroke_points(nd, preset):
     return []
 
 
+def render_center_dots(frame_bgr, nails, color=(90, 255, 110), ring=True):
+    """손톱 정중앙(cx,cy)에 도넛 점을 찍는다. 안경 NailCenterDot.cs의 파이썬 프리뷰."""
+    out = frame_bgr.copy()
+    for nd in nails:
+        if not nd.get("contour"):
+            continue
+        c = (int(round(nd["cx"])), int(round(nd["cy"])))
+        r = max(6, int(float(nd.get("wid", 30)) * 0.16))
+        if ring:
+            cv2.circle(out, c, r, color, 3, cv2.LINE_AA)              # 링(가운데 안 가림)
+            cv2.circle(out, c, 2, color, -1, cv2.LINE_AA)            # 정중앙 미세 점
+        else:
+            cv2.circle(out, c, r, color, -1, cv2.LINE_AA)
+    return out
+
+
 def _dashed(out, pts, color, thick=2, dash=2):
     for i in range(0, len(pts) - 1, dash):
         cv2.line(out, tuple(pts[i]), tuple(pts[min(i + 1, len(pts) - 1)]), color, thick, cv2.LINE_AA)
