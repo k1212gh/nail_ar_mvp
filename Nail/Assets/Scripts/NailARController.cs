@@ -20,6 +20,7 @@ public class NailARController : MonoBehaviour
     public NailOverlayRenderer overlay;         // draws design on nails (flat sprites)
     public NailGridRenderer grid;               // graph-paper grid per nail (사장님 PoC); created at runtime if null
     public NailMeshRenderer meshR;              // curved per-nail mesh + baked textures; created at runtime if null
+    public NailCenterDot centerDot;             // 손톱 정중앙 점(도넛); 런타임 생성, overlay와 같은 calib 사용
     [Header("Edge")]
     public string edgeUrl = "https://127.0.0.1:8443/infer";  // edge_serve.py (adb reverse tcp:8443)
     public float inferIntervalSec = 0.15f;
@@ -34,6 +35,9 @@ public class NailARController : MonoBehaviour
     public int camW = 640, camH = 400;                   // waveguide (1280 doubles per eye); measured 2026-07-04.
                                                          // live-tunable via calib {"camW":..,"camH":..} but reopen
                                                          // is unreliable on-device, so this default is what ships.
+    public int camFps = 60;                              // requested camera preview fps (SDK default 30). Actual is
+                                                         // sensor+light bound; 60 removes the soft 30 cap so bright
+                                                         // scenes can drive the display (60Hz) closer to full rate.
     private XRCameraHandler m_Handler;
 
     private XRCameraHandler OpenCam()
@@ -42,13 +46,13 @@ public class NailARController : MonoBehaviour
         // the RayNeo camera HAL is wedged (native blocks) -> needs a device reboot + single launch.
         int rw = Mathf.Max(320, camW), rh = Mathf.Max(240, camH);
         Debug.Log($"[NailAR] ShareCamera.OpenCamera calling ({rw}x{rh})…");
-        var h = ShareCamera.OpenCamera(m_CamType, new XRResolution(rw, rh), cameraView);
+        var h = ShareCamera.OpenCamera(m_CamType, new XRResolution(rw, rh), cameraView, camFps);
         Debug.Log($"[NailAR] ShareCamera.OpenCamera returned {(h != null ? "handle" : "null")}");
         if (h == null && (camW != 640 || camH != 400))
         {
             Debug.LogError($"[NailAR] {camW}x{camH} unsupported -> fallback 640x400");
             camW = 640; camH = 400;
-            h = ShareCamera.OpenCamera(m_CamType, new XRResolution(640, 400), cameraView);
+            h = ShareCamera.OpenCamera(m_CamType, new XRResolution(640, 400), cameraView, camFps);
             Debug.Log($"[NailAR] fallback OpenCamera returned {(h != null ? "handle" : "null")}");
         }
         return h;
@@ -118,6 +122,8 @@ public class NailARController : MonoBehaviour
 
     void Start()
     {
+        QualitySettings.vSyncCount = 0;      // don't gate render on display vSync
+        Application.targetFrameRate = 60;    // uncap render loop (Android default caps ~30) so camera frames aren't dropped
         m_Edge.url = edgeUrl;
         // (double-tap-to-quit was a Samples-only helper; omitted. Add later if needed.)
         StartCoroutine(EnsurePermissionThenOpen());
@@ -735,6 +741,13 @@ public class NailARController : MonoBehaviour
             meshR.cameraViewRect = overlay.cameraViewRect;
         }
 
+        // Center-dot renderer (손톱 정중앙 점): same runtime-creation pattern.
+        if (centerDot == null && overlay != null && overlay.cameraViewRect != null)
+        {
+            centerDot = overlay.gameObject.AddComponent<NailCenterDot>();
+            centerDot.cameraViewRect = overlay.cameraViewRect;
+        }
+
         // Reparent the overlay/grid coordinate-space from the feed RawImage to the CANVAS (its parent,
         // same rect/size). Then SetFeed can deactivate the feed RawImage GameObject for true see-through
         // WITHOUT hiding the overlay/grid. Do this before ApplyMode so new design/grid children land here.
@@ -746,6 +759,7 @@ public class NailARController : MonoBehaviour
                 overlay.cameraViewRect = canvasRT;
                 if (grid != null) grid.cameraViewRect = canvasRT;
                 if (meshR != null) meshR.cameraViewRect = canvasRT;
+                if (centerDot != null) centerDot.cameraViewRect = canvasRT;
             }
         }
 
@@ -945,6 +959,13 @@ public class NailARController : MonoBehaviour
         overlay.SetResults(shown, res.w, res.h);
         if (grid != null) grid.SetResults(shown, res.w, res.h);
         if (meshR != null) meshR.SetResults(shown, res.w, res.h);
+        if (centerDot != null)   // overlay와 동일 calib를 매 프레임 복사 → 디자인 자리와 정확히 일치
+        {
+            centerDot.rotQuadrant = overlay.rotQuadrant;
+            centerDot.mirrorX = overlay.mirrorX; centerDot.mirrorY = overlay.mirrorY;
+            centerDot.calibOffset = overlay.calibOffset; centerDot.calibScale = overlay.calibScale;
+            centerDot.SetResults(shown, res.w, res.h);
+        }
         UpdateGuideCenter(res);                     // loupe: re-centre on the worked nail
         // designs are created at runtime as canvas children -> they land on the DEFAULT layer and
         // would leak into both eyes. Re-stamp the mono layer after each update.
