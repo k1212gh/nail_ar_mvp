@@ -18,8 +18,8 @@ public class NailCenterDot : MonoBehaviour
 
     [Header("Crosshair")]
     public Color color = new Color(0.16f, 1f, 0.42f, 0.95f);   // 초록
-    [Range(0.4f, 1.5f)] public float sizeScale = 1.0f;         // 손톱 대비 십자 길이 배율
-    public float minPx = 26f;                                  // 너무 작지 않게 하한
+    [Range(0.4f, 1.5f)] public float sizeScale = 1.1f;         // 손톱 대비 십자 길이 배율(살짝 넘기게)
+    public float minPx = 44f;                                  // 너무 작지 않게 하한(작아도 십자 보이게)
 
     [Header("AR calibration (NailOverlayRenderer 와 같은 값)")]
     public int rotQuadrant = 1;
@@ -101,10 +101,12 @@ public class NailCenterDot : MonoBehaviour
     private Sprite CrossSprite()
     {
         if (m_Cross != null) return m_Cross;
-        const int S = 128; const int half = 1;   // 얇은 선(두께 2*half+1 = 3px)
+        // 스프라이트(128px)가 손톱 크기(~40px)로 축소되면 선이 그만큼 얇아짐.
+        // 화면에서 ~2.5px로 얇게 '보이게' 하려면 스프라이트 선은 7px 필요(half=3).
+        const int S = 128; const int half = 3;   // 선 두께 2*half+1 = 7px(축소 후 화면 ~2.5px = 얇음)
         var tex = new Texture2D(S, S, TextureFormat.RGBA32, false) { filterMode = FilterMode.Bilinear };
         int c = S / 2;
-        float dotR = 4.5f;                        // 중앙 점 반지름(안 비게)
+        float dotR = 8f;                          // 중앙 점 반지름(축소돼도 안 비게 = ~5px)
         var px = new Color32[S * S];
         for (int y = 0; y < S; y++)
             for (int x = 0; x < S; x++)
