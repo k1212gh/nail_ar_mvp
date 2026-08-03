@@ -64,35 +64,13 @@ public class NailCenterDot : MonoBehaviour
             var r = rois[i];
             float nx = Mathf.Clamp01(r.cx / m_ImgW), ny = Mathf.Clamp01(r.cy / m_ImgH);
             Vector2 center = MapNormToLocal(nx, ny, q, size);
-            // 장축(base->tip) 방향 — 십자 회전에 사용
-            float tnx = Mathf.Clamp01((r.cx + r.ex * r.len * 0.5f) / m_ImgW);
-            float tny = Mathf.Clamp01((r.cy + r.ey * r.len * 0.5f) / m_ImgH);
-            Vector2 axis = MapNormToLocal(tnx, tny, q, size) - center;
-            float deg = (axis.sqrMagnitude > 1e-4f) ? Mathf.Atan2(-axis.x, axis.y) * Mathf.Rad2Deg : 0f;
-            // 십자 크기 = 손톱 wid×len (축 스왑은 90/270에서)
-            float w = Mathf.Max(minPx, (r.wid / m_ImgW) * size.x * calibScale * sizeScale);
-            float h = Mathf.Max(minPx, (r.len / m_ImgH) * size.y * calibScale * sizeScale);
-            if (q == 1 || q == 3) { var t = w; w = h; h = t; }
+            // 십자 = 손톱 크기 비례 정사각 + 고정 방향(회전 안 함 = 안 돎). 얇은 선은 스프라이트가 유지.
+            float w = (r.wid / m_ImgW) * size.x * calibScale;
+            float h = (r.len / m_ImgH) * size.y * calibScale;
+            float sq = Mathf.Max(minPx, Mathf.Max(w, h) * sizeScale);
             var e = GetEntry(KeyFor(r, i));
-            // --- 회전 안정화: 손 돌리면 따라가되, 가만히 있을 때 지터/스핀 제거 ---
-            float elong = Mathf.Max(r.len, r.wid) / Mathf.Max(1f, Mathf.Min(r.len, r.wid));
-            float stableDeg;
-            if (elong < elongMin)
-            {
-                stableDeg = e.hasRot ? e.rot : 0f;            // 둥근 손톱=방향 애매 → 이전 유지(안 돎)
-            }
-            else if (!e.hasRot)
-            {
-                stableDeg = deg;                               // 첫 프레임
-            }
-            else
-            {
-                float d = Mathf.DeltaAngle(e.rot, deg);
-                if (Mathf.Abs(d) > 90f) { deg += 180f; d = Mathf.DeltaAngle(e.rot, deg); }  // 180° 뒤집힘 해소
-                stableDeg = (Mathf.Abs(d) < rotDeadzoneDeg) ? e.rot : deg;                   // 데드존: 미세변화 무시
-            }
-            e.pos = center + calibOffset; e.size = new Vector2(w, h);
-            e.rot = stableDeg; e.hasRot = true;
+            e.pos = center + calibOffset; e.size = new Vector2(sq, sq);
+            e.rot = 0f; e.hasRot = true;
             e.lastSeen = Time.time;
         }
     }
@@ -119,25 +97,21 @@ public class NailCenterDot : MonoBehaviour
         return e;
     }
 
-    // 런타임 '+' 스프라이트(가로/세로 얇은 바). 손톱 크기로 늘려 십자가 손톱을 가로지른다.
+    // 런타임 '+' 스프라이트: 얇은 가로/세로 선 + 중앙 점(안 비게). 고배율 텍스처라 얇게 유지.
     private Sprite CrossSprite()
     {
         if (m_Cross != null) return m_Cross;
-        const int S = 64; const int half = 3;   // 바 두께 = 2*half
+        const int S = 128; const int half = 1;   // 얇은 선(두께 2*half+1 = 3px)
         var tex = new Texture2D(S, S, TextureFormat.RGBA32, false) { filterMode = FilterMode.Bilinear };
         int c = S / 2;
+        float dotR = 4.5f;                        // 중앙 점 반지름(안 비게)
         var px = new Color32[S * S];
         for (int y = 0; y < S; y++)
             for (int x = 0; x < S; x++)
             {
                 bool onBar = (Mathf.Abs(x - c) <= half) || (Mathf.Abs(y - c) <= half);
-                byte a = 0;
-                if (onBar)
-                {
-                    // 중심에서 멀수록 살짝 페이드(끝을 부드럽게)
-                    float d = Mathf.Max(Mathf.Abs(x - c), Mathf.Abs(y - c)) / (float)c;
-                    a = (byte)(Mathf.Clamp01(1f - 0.15f * d) * 255);
-                }
+                float dc = Mathf.Sqrt((x - c) * (x - c) + (y - c) * (y - c));
+                byte a = (onBar || dc <= dotR) ? (byte)255 : (byte)0;
                 px[y * S + x] = new Color32(255, 255, 255, a);
             }
         tex.SetPixels32(px); tex.Apply();
