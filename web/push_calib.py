@@ -47,11 +47,19 @@ BASE = {
     "guideAuto": -1, "guideTarget": -1.0, "guideZoomMin": -1.0, "guideZoomMax": -1.0,
     # 지연 보상 예측(ms). 0=끔, ~150=오프로드 지연 상쇄
     "predictMs": -1.0,
+    # 안경 직접 중계(PC의 screenrecord+컴포지터 없이 안경이 릴레이로 자기 화면 전송).
+    # relayOn=1 송출 / relayUrl=http://<릴레이IP>:8090 / relayToken=<PUSH_TOKEN> 이 셋이 있어야 실제로 나간다.
+    "relayOn": -1, "relayUrl": "", "relayToken": "", "relayFps": -1.0,
+    "relayW": -1, "relayQ": -1, "relayFlipY": -1,
 }
+
+# 로그에 그대로 찍으면 안 되는 값 (콘솔·터미널 기록에 토큰이 남는다)
+SECRET_KEYS = {"relayToken"}
 
 def main() -> None:
     d = dict(BASE)
     pkg = PKG
+    serial = os.environ.get("ANDROID_SERIAL", "")   # 안경+폰이 같이 붙어 있으면 adb가 대상을 못 고른다
     args = sys.argv[1:]
     if not args:                                    # 인자 없음 = 그리드 오프셋만 0으로 리셋
         d["gridOffX"], d["gridOffY"] = 0.0, 0.0
@@ -61,6 +69,8 @@ def main() -> None:
         k, v = a.split("=", 1)
         if k == "pkg":                              # 대상 앱 패키지 지정(특수 키)
             pkg = v; continue
+        if k == "serial":                           # 대상 기기 지정(특수 키). 안경/폰 동시 연결 시 필수
+            serial = v; continue
         if k not in d:
             print(f"skip unknown key '{k}'"); continue
         # str vs bool vs int vs float — base 값의 타입으로 결정
@@ -72,9 +82,10 @@ def main() -> None:
     with open(LOCAL, "w") as f:
         json.dump(d, f)
     dst = f"/sdcard/Android/data/{pkg}/files/nail_calib.json"
-    changed = {k: d[k] for k in d if d[k] != BASE[k]}
-    r = subprocess.run(["adb", "push", LOCAL, dst], capture_output=True, text=True)
-    print(f"push -> {pkg}: {changed} rc={r.returncode} {r.stderr.strip()}")
+    changed = {k: ("***" if k in SECRET_KEYS else d[k]) for k in d if d[k] != BASE[k]}
+    cmd = ["adb"] + (["-s", serial] if serial else []) + ["push", LOCAL, dst]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    print(f"push -> {pkg}{f'@{serial}' if serial else ''}: {changed} rc={r.returncode} {r.stderr.strip()}")
 
 if __name__ == "__main__":
     main()

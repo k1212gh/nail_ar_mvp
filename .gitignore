@@ -84,6 +84,8 @@ camera_calib.json
 Thumbs.db
 .vscode/
 *.swp
+# Windows 바로가기(머신 전용 절대경로) — 커밋 무의미
+*.lnk
 
 # Electron 패키지 산출물(대용량)
 platform/apps/desktop/dist-app/

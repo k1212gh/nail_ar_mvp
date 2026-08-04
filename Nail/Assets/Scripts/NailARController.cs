@@ -71,6 +71,7 @@ public class NailARController : MonoBehaviour
     private readonly EdgeClient m_Edge = new EdgeClient();
     private readonly EdgeSocketClient m_Sock = new EdgeSocketClient();   // raw TCP fast path (B')
     private bool m_UseSocket;
+    private RelayPusher m_Relay;         // 안경 → 릴레이 직접 송출(PC 경유 제거); 런타임 생성, 씬 편집 0
     private bool m_Running;
     private Texture2D m_Grab;
 
@@ -125,6 +126,8 @@ public class NailARController : MonoBehaviour
         QualitySettings.vSyncCount = 0;      // don't gate render on display vSync
         Application.targetFrameRate = 60;    // uncap render loop (Android default caps ~30) so camera frames aren't dropped
         m_Edge.url = edgeUrl;
+        // 중계 송출기 — 주소/토큰이 calib로 들어오기 전까지는 idle(Ready=false)이라 비용 0.
+        m_Relay = gameObject.AddComponent<RelayPusher>();
         // (double-tap-to-quit was a Samples-only helper; omitted. Add later if needed.)
         StartCoroutine(EnsurePermissionThenOpen());
         StartCoroutine(PollCalib());   // live-tune alignment via adb-pushed nail_calib.json
@@ -212,6 +215,14 @@ public class NailARController : MonoBehaviour
         public float lifesizeMax = -1f;        // clamp on the zoom (safety); <=0 = leave
         // --- RENDER GATING: hide designs while the hand moves (kills latency ghosting) ---
         public int gate = -1;                  // 1=only render nails the server marks stable, 0=off, -1=leave
+        // --- 안경 직접 중계: PC(adb screenrecord + 컴포지터) 없이 안경이 자기 화면을 릴레이로 올린다 ---
+        public int relayOn = -1;               // 1=송출, 0=중지, -1=leave
+        public string relayUrl = "";           // ""=leave. 예: http://161.33.176.78:8090
+        public string relayToken = "";         // ""=leave. 릴레이 PUSH_TOKEN
+        public float relayFps = -1f;           // <=0=leave (기본 12; 안경 발열 때문에 PC 컴포지터보다 낮게)
+        public int relayW = -1;                // <=0=leave. 전송 가로 px (세로는 종횡비 유지)
+        public int relayQ = -1;                // <=0=leave. JPEG 품질
+        public int relayFlipY = -1;            // 1=상하 뒤집기(화면이 거꾸로 보일 때), 0=아니오, -1=leave
     }
     private int m_LastBakeReload = -1;
 
@@ -332,6 +343,26 @@ public class NailARController : MonoBehaviour
             { m_PanelRadPerPx = c.panelRadPerPx; Debug.Log($"[NailAR] panelRadPerPx -> {m_PanelRadPerPx:F6}"); }
             if (c.lifesizeMax > 0f) m_LifesizeMax = c.lifesizeMax;
             if (c.gate != -1 && (c.gate == 1) != m_GateOn) { m_GateOn = c.gate == 1; Debug.Log($"[NailAR] gate -> {m_GateOn}"); }
+            // --- 안경 직접 중계 (주소/토큰이 채워져야 실제로 송출한다) ---
+            if (m_Relay != null)
+            {
+                // ""=leave 규약: 준 것만 덮어쓰고 나머지는 현재 값을 유지한다.
+                bool touched = !string.IsNullOrEmpty(c.relayUrl) || !string.IsNullOrEmpty(c.relayToken);
+                m_Relay.SetEndpoint(
+                    string.IsNullOrEmpty(c.relayUrl) ? m_Relay.Url : c.relayUrl,
+                    string.IsNullOrEmpty(c.relayToken) ? m_Relay.Token : c.relayToken);
+                if (c.relayFps > 0f) { m_Relay.fps = c.relayFps; touched = true; }
+                if (c.relayW > 0) { m_Relay.width = c.relayW; touched = true; }
+                if (c.relayQ > 0) { m_Relay.quality = Mathf.Clamp(c.relayQ, 30, 95); touched = true; }
+                if (c.relayFlipY != -1) { m_Relay.flipY = c.relayFlipY == 1; touched = true; }
+                if (c.relayOn != -1 && (c.relayOn == 1) != m_Relay.on)
+                {
+                    m_Relay.on = c.relayOn == 1; touched = true;
+                    Debug.Log($"[NailAR] relay -> {(m_Relay.on ? (m_Relay.Ready ? "ON" : "ON(대기: url/token 미설정)") : "OFF")}");
+                }
+                // 다른 용도의 calib push가 relay 필드를 센티널로 덮어써도 살아남게 기기에 남긴다.
+                if (touched) m_Relay.SavePrefs();
+            }
             // --- viewing: manual zoom / guide loupe / mono ---
             if (c.zoom > 0f && !Mathf.Approximately(c.zoom, m_ManualZoom))
             { m_ManualZoom = c.zoom; ApplyCanvasXform(); Debug.Log($"[NailAR] zoom -> {m_ManualZoom:F2}"); }
